@@ -255,6 +255,50 @@ Pair with ErrorBoundary for complete async state coverage:
 | `Suspense` at page/section level | Multiple async components, want clean component code |
 | `Suspense` + `ErrorBoundary` | Full coverage — loading + error handled declaratively |
 
+## 9. Avoid forwardRef — Return API Object from Hook Instead
+
+`forwardRef` + `useImperativeHandle` is fragile. Expose component API via a hook that returns methods.
+
+```tsx
+// ❌ forwardRef — fragile contract, no type-safe return, hidden API
+const Table = forwardRef<TableHandle, Props>((props, ref) => {
+  useImperativeHandle(ref, () => ({ reset: () => { ... }, refresh: () => { ... } }));
+  return <table>...</table>;
+});
+// Usage: <Table ref={tableRef} /> — parent needs ref + typeof TableHandle
+
+// ✅ hook returns API object — explicit, type-safe, discoverable
+function useTable() {
+  const [data, setData] = useState([]);
+  const reset = () => setData([]);
+  const refresh = () => fetchData().then(setData);
+  return { data, reset, refresh };
+}
+
+function Table({ data }: { data: Item[] }) {
+  return <table>...</table>;
+}
+
+// Usage:
+function Page() {
+  const { data, reset, refresh } = useTable();
+  return (
+    <>
+      <button onClick={reset}>Reset</button>
+      <Table data={data} />
+    </>
+  );
+}
+```
+
+**Why:**
+- Hook return type is explicit and IDE-discoverable
+- No hidden imperative API — `const { reset } = useTable()` is self-documenting
+- No ref juggling — `ref.current?.reset()` vs just calling `reset()`
+- Works with React DevTools — ref methods are invisible
+
+**Exception:** `forwardRef` is fine for DOM ref forwarding (`ref` to an `<input>` for focus management). Just don't use it to expose custom imperative methods.
+
 ## Why a Separate Skill
 
 `vercel-react-best-practices` is upstream. Team conventions live here so the upstream skill stays updateable.
