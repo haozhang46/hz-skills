@@ -1,5 +1,5 @@
 ---
-name: react-coding-conventions
+name: react-fe-skill
 description: Use when writing React components or hooks — enforces named hook functions, explicit returns, and other team conventions not covered by vercel-react-best-practices
 ---
 
