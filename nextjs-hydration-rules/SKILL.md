@@ -58,16 +58,25 @@ Any component using `onClick`, `onChange`, `useState`, `useEffect`, `useContext`
 export default function LikeButton() { ... }
 ```
 
-### 5. List Keys → Backend Unique ID Only
+### 5. List Keys → Stable Unique ID Only
 
 ```tsx
 // ❌ BROKEN — re-renders wrong DOM on reorder
 {posts.map((_, i) => <div key={i} />)}
 {posts.map((p) => <div key={Math.random()} />)}
+{posts.map((p) => <div key={Date.now()} />)}
 
-// ✅ Backend ID
+// ✅ Backend ID (preferred)
 {posts.map((p) => <div key={p.id} />)}
+
+// ✅ No backend ID → use uuid library
+import { v4 as uuid } from 'uuid';
+const items = rawItems.map((item) => ({ ...item, _id: uuid() }));
 ```
+
+**Never** `Math.random()` or `Date.now()` for keys — they change every render and destroy React's reconciliation.
+
+**`useId()` from React is NOT for list keys.** It's for accessibility attributes (`aria-labelledby`). Use `uuid` library or `crypto.randomUUID()` (browser-native).
 
 ### 6. suppressHydrationWarning — Time Text Only
 
