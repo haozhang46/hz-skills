@@ -1,21 +1,27 @@
 ---
 name: dto-mapper-layer
-description: Use when fetching API data into React state — enforces a mapper/DTO transform layer before state, never store raw API response directly
+description: Use when fetching data from any source (REST, GraphQL, etc.) before storing in state — enforces a mapper/DTO transform layer, never store raw response directly
 ---
 
 # DTO Mapper Layer
 
-**Raw API response → Mapper → DTO → State. Never put API data directly into `useState` or `useSWR`.**
+**Raw response → Mapper → DTO → State. Library-agnostic — SWR, React Query, fetch, axios, GraphQL all use the same pattern.**
 
 ## The Rule
 
 ```tsx
-// ❌ BROKEN — raw API shape leaks into UI
-const { data } = useSWR(['posts', apiUrl], () => fetchPosts(apiUrl));
-// data.posts[0].created_at — snake_case, API-specific fields, nulls
+// ❌ BROKEN — raw response shape leaks into UI
+const [posts, setPosts] = useState<Post[]>([]);
+useEffect(() => { fetch('/api/posts').then(r => r.json()).then(setPosts); }, []);
+// posts[0].created_at — snake_case, API-specific fields, nulls
 
-// ✅ Mapper layer
-const { data: raw } = useSWR(['posts', apiUrl], () => fetchPosts(apiUrl));
+// ❌ Also broken with any library
+const { data } = useSWR('posts', url);     // SWR
+const { data } = useQuery(...);             // React Query
+const data = await fetch(...).then(r => r.json()); // plain fetch
+
+// ✅ Mapper layer — works with any data fetching approach
+const { data: raw } = useSWR('posts', fetchPosts);
 const posts = useMemo(() => (raw ?? []).map(toPostCard), [raw]);
 
 // DTO: clean, camelCase, UI-specific defaults
