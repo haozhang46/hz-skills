@@ -234,8 +234,10 @@ onClick={async () => { try { await submit(); } catch (err) { setError(err.messag
 function createPost(title: string, content: string, published: boolean, authorId: string) {}
 createPost('Hello', '...', true, 'u-123'); // what does true mean?
 
-// ✅ destructured object — self-documenting
-function createPost({ title, content, published = false, authorId }: CreatePostParams) {}
+// ✅ options object, destructure in body
+function createPost(params: CreatePostParams) {
+  const { title, content, published = false, authorId } = params;
+}
 createPost({ title: 'Hello', content: '...', authorId: 'u-123' });
 ```
 
@@ -244,11 +246,22 @@ createPost({ title: 'Hello', content: '...', authorId: 'u-123' });
 | Rule | Why |
 |------|-----|
 | Max 3 parameters | Beyond 3 → refactor to options object |
-| Destructure in signature | `{ a, b }` not `params.a` |
-| Defaults in destructure | `{ published = false }` not `params.published ?? false` |
+| Destructure in body | `const { a, b } = props` — not in signature |
+| Signature is `props: Props` | Single typed parameter, clean |
+| Defaults in destructure | `const { published = false } = props` |
 | Type the options object | `CreatePostParams` interface, not inline |
 | Never use `arguments` | Use rest params `...args` instead |
 | Boolean params → options object | `createPost({ published: true })` not `createPost(true)` |
+
+```tsx
+// ❌ destructure in signature — noisy, messy with spread
+function PostCard({ title, excerpt, date, ...rest }: Props) { ... }
+
+// ✅ clean signature, destructure in body
+function PostCard(props: Props) {
+  const { title, excerpt, date } = props;
+}
+```
 
 ```tsx
 // ❌ arguments object — no type safety, no arrow function support
