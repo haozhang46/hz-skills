@@ -359,6 +359,59 @@ function Article({ blocks }: { blocks: Block[] }) {
 | `lazy()` + `Suspense` | Plain React, code-splitting |
 | Component registry | Data drives which component renders (CMS, block editor) |
 
+## 11. Avoid cloneElement — Use Render Prop or Registry
+
+`cloneElement` creates a new element every render, breaks `memo`, and causes cascading re-renders.
+
+```tsx
+// ❌ cloneElement — new element every render, breaks memo
+function FormField({ children, label }: { children: ReactElement; label: string }) {
+  return (
+    <div>
+      <span>{label}</span>
+      {cloneElement(children, { id: label, required: true })}
+    </div>
+  );
+}
+
+// ✅ render prop — no clone, explicit contract
+function FormField({ render, label }: { render: (props: FieldProps) => ReactNode; label: string }) {
+  return (
+    <div>
+      <span>{label}</span>
+      {render({ id: label, required: true })}
+    </div>
+  );
+}
+<FormField label="Email" render={(p) => <Input {...p} />} />
+
+// ✅ component registry — data drives rendering, no clone
+const FIELD_COMPONENTS = { text: Input, select: Select, date: DatePicker } as const;
+
+function FormField({ type, ...fieldProps }: { type: keyof typeof FIELD_COMPONENTS } & FieldProps) {
+  const Component = FIELD_COMPONENTS[type];
+  return (
+    <div>
+      <span>{fieldProps.label}</span>
+      <Component {...fieldProps} />
+    </div>
+  );
+}
+
+// ✅ children as function — pass props through function call
+function FormField({ children, label }: { children: (props: FieldProps) => ReactNode; label: string }) {
+  return <div><span>{label}</span>{children({ id: label, required: true })}</div>;
+}
+```
+
+**Why cloneElement is harmful:**
+- New React element object every render → `memo` is useless on children
+- Cascading re-renders down the tree
+- Hidden contract — child has no idea what props are being injected
+- Slower than function call or JSX
+
+**When cloneElement IS acceptable:** Injecting a class name or style into a single immediate child in a design-system component (e.g., `ButtonGroup` adding margin to `Button` children). Even then, prefer CSS `gap` or `:has()`.
+
 ## Why a Separate Skill
 
 `vercel-react-best-practices` is upstream. Team conventions live here so the upstream skill stays updateable.
