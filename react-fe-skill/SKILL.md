@@ -420,13 +420,16 @@ function Article({ blocks }: { blocks: Block[] }) {
 }
 ```
 
-| Pattern | Use when |
-|---------|----------|
-| Ternary / `&&` | 2 states, simple |
-| Map object | 3+ states, static list of variants |
-| `dynamic()` | Next.js, heavy lib, SSR-skip |
-| `lazy()` + `Suspense` | Plain React, code-splitting |
-| Component registry | Data drives which component renders (CMS, block editor) |
+| Pattern | Use when | Platform |
+|---------|----------|----------|
+| Ternary / `&&` | 2 states, simple | All |
+| Map object | 3+ states, static list of variants | All |
+| `dynamic()` | Next.js, heavy lib, SSR-skip | **Next.js only** |
+| `lazy()` + `Suspense` | Plain React, code-splitting | React / React Native |
+| `React.lazy()` | React Native heavy screen | **React Native** |
+| Component registry | Data drives which component renders (CMS, block editor) | All |
+
+**Platform note:** `next/dynamic` is Next.js-only. React Native uses `React.lazy()` + `Suspense` for code-splitting screens, or a navigation-based lazy load.
 
 ## 11. Avoid cloneElement — Use Render Prop or Registry
 
