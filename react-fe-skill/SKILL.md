@@ -192,17 +192,52 @@ set(state); // same reference — zustand skips
 **When you DON'T need immutability:**
 - Local variables in a function — no one is watching them
 - `useRef` — mutable by design, `.current` is meant to be mutated
-- Temporary computation before returning new state — mutate a draft, return the result
-- `immer` wrapped stores — immer makes "mutate" safe by proxying
 
-```ts
-// ✅ OK to mutate — useRef is designed for it
-const countRef = useRef(0);
-countRef.current += 1; // fine, no re-render triggered
+### Immer — When to Use
 
-// ✅ OK — immer wraps the mutation
-set(immer((s) => { s.count += 1; }));
+Use `immer` when the update is deeply nested and spread becomes unreadable:
+
+```tsx
+import { produce } from 'immer';
+import { create } from 'zustand';
+import { immer } from 'zustand/middleware/immer';
+
+// ❌ spread hell — 4 levels deep, easy to miss a level
+set((s) => ({
+  ...s,
+  posts: {
+    ...s.posts,
+    [postId]: {
+      ...s.posts[postId],
+      meta: {
+        ...s.posts[postId].meta,
+        viewCount: s.posts[postId].meta.viewCount + 1,
+      }
+    }
+  }
+}));
+
+// ✅ immer — "mutate" a draft, immer produces the new reference
+set(produce((s) => {
+  s.posts[postId].meta.viewCount += 1;
+}));
+
+// ✅ or zustand immer middleware — no produce() wrap needed
+const useStore = create(immer((set) => ({
+  posts: {},
+  incView: (postId) => set((s) => { s.posts[postId].meta.viewCount += 1; }),
+})));
 ```
+
+| Use immer | Use spread | Use neither |
+|-----------|-----------|-------------|
+| 3+ levels deep | 1-2 levels | useRef (mutable by design) |
+| Array element update | Simple object | Local temp variables |
+| Normalized state shape | Flat state | — |
+
+**With Redux Toolkit:** `createSlice` already includes immer — `state.count += 1` in a reducer is safe.
+
+## 7. Error Boundaries
 
 ## 7. Error Boundaries — Crash a Section, Not the Whole Page
 
