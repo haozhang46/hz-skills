@@ -79,6 +79,43 @@ HTML stays BEM-only. CSS uses Tailwind `@apply` to compose styles from design to
 
 **Note:** The `bem-class-names-only` rule applies to HTML className only. `@apply` with Tailwind utilities inside CSS files is the intended pattern — it keeps the design system DRY while HTML stays semantic.
 
+## No `&` Nesting — Full Class Names Only
+
+Every selector must be a complete, searchable class name. No `&__`, `&--`, `&:`, `&::` shortcuts.
+
+```css
+/* ❌ & nesting — unsearchable, hides the full selector */
+.post-card {
+  @apply px-5 py-3;
+  &__title { @apply font-bold; }
+  &--featured { border-color: #fff; }
+  &:hover { opacity: 0.8; }
+  &::after { content: ''; }
+}
+
+/* ✅ full class names — grep-friendly, explicit */
+.post-card {
+  @apply px-5 py-3;
+}
+.post-card__title {
+  @apply font-bold;
+}
+.post-card--featured {
+  border-color: #fff;
+}
+.post-card:hover {
+  opacity: 0.8;
+}
+.post-card::after {
+  content: '';
+}
+```
+
+**Why:**
+- `grep post-card__title` finds the exact definition
+- No mental compile step — see the class in HTML, find it in CSS immediately
+- `&` nesting hides the cascade and specificity problems
+
 ## Red Flags — Immediate STOPS
 
 - `flex`, `grid`, `p-4`, `m-2`, `gap-4` in className
