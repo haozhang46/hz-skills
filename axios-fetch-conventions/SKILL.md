@@ -38,9 +38,7 @@ const { data, error, loading } = useRequest(() => http.get('/posts'));
 | `@tanstack/react-query` | Complex server state, mutations, pagination |
 | `ahooks` `useRequest` | Lightweight, already using ahooks for other hooks |
 
-## 2. Unified Instance
-
-Don't scatter `axios.get()` with inline URLs. Create a single configured instance.
+## 2. Unified Instance — No Manual Token Header
 
 ```ts
 // lib/http.ts
@@ -49,9 +47,25 @@ import axios from 'axios';
 export const http = axios.create({
   baseURL: process.env.NEXT_PUBLIC_API_URL,
   timeout: 15000,
-  withCredentials: true,
+  withCredentials: true, // sends httpOnly cookies automatically
 });
+
+// ❌ NEVER do this — token in localStorage = XSS hole
+http.interceptors.request.use((config) => {
+  const token = localStorage.getItem('token');
+  config.headers.Authorization = `Bearer ${token}`;
+  return config;
+});
+
+// ✅ httpOnly cookie — browser sends it via withCredentials, JS can't read it
+// No interceptor needed. No manual header. Cookie is invisible to JS.
 ```
+
+**Why `withCredentials` is enough:**
+- httpOnly cookie is set by backend (`Set-Cookie` header)
+- Browser attaches it to every request automatically
+- JS can't read the token → XSS can't steal it
+- No manual `Authorization` header needed
 
 ## 3. Interceptors — Error Handling in One Place
 
