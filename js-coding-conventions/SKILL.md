@@ -271,6 +271,98 @@ function sum() { return Array.from(arguments).reduce((a, b) => a + b, 0); }
 function sum(...nums: number[]) { return nums.reduce((a, b) => a + b, 0); }
 ```
 
+## 10. cloneDeep — When and Limits
+
+```ts
+import { cloneDeep } from 'lodash-es';
+
+// ✅ mutable state snapshot, undo/redo, deep comparison cache
+const snapshot = cloneDeep(formData);
+
+// ❌ don't use for simple objects — spread is enough
+const copy = { ...obj, nested: { ...obj.nested } };
+// ❌ don't clone in render loop — performance killer
+// ❌ don't clone DOM nodes / class instances / functions — they don't survive
+```
+
+| Use `cloneDeep` | Use spread / structuredClone |
+|-----------------|------------------------------|
+| Undo/redo state | Simple 1-level objects |
+| Before mutating nested refs | `structuredClone(obj)` — browser native, works for most |
+| Deep comparison cache | No circular refs, no functions |
+
+## 11. Class — Get/Set, No Deep Inheritance
+
+```ts
+// ✅ getters for derived values, setters for validation
+class User {
+  constructor(private data: UserData) {}
+  get displayName() { return `${this.data.first} ${this.data.last}`; }
+  set email(value: string) {
+    if (!value.includes('@')) throw new Error('Invalid email');
+    this.data.email = value;
+  }
+}
+```
+
+| Rule | Why |
+|------|-----|
+| `get` for derived values only | Pure computation, no side effects |
+| `set` for validation gate | Validate before storing |
+| Max 1 level inheritance | Deep hierarchies are a code smell in JS/TS |
+| Prefer composition over inheritance | `class A { constructor(private b: B) {} }` |
+| No `class` for plain data | Use `interface` / `type` |
+
+## 12. Recursion — Guard with Depth Limit
+
+```ts
+// ❌ unbounded recursion — stack overflow
+function deepMap(obj: unknown, fn: (v: unknown) => unknown) {
+  if (typeof obj !== 'object') return fn(obj);
+  return Object.fromEntries(Object.entries(obj).map(([k, v]) => [k, deepMap(v, fn)]));
+}
+
+// ✅ depth limit
+function deepMap(obj: unknown, fn: (v: unknown) => unknown, maxDepth = 100) {
+  if (maxDepth <= 0) throw new Error('Max recursion depth exceeded');
+  if (typeof obj !== 'object' || obj === null) return fn(obj);
+  return Object.fromEntries(
+    Object.entries(obj).map(([k, v]) => [k, deepMap(v, fn, maxDepth - 1)])
+  );
+}
+```
+
+**Prefer iterative over recursive** for unknown-depth structures:
+
+```ts
+// ✅ iterative — no stack limit
+function deepMapIterative(root: unknown, fn: (v: unknown) => unknown) {
+  const stack: [Record<string, unknown>, Record<string, unknown>][] = [[{}, root as any]];
+  const result: Record<string, unknown> = {};
+  // ... BFS/DFS with explicit stack
+}
+```
+
+## 13. Object.freeze — Immutable Constants
+
+```ts
+// ✅ frozen constants — prevents accidental mutation
+export const CONFIG = Object.freeze({
+  MAX_POSTS: 100,
+  API_TIMEOUT: 5000,
+  REGIONS: Object.freeze(['US', 'EU', 'APAC']),
+});
+```
+
+| Use `Object.freeze` | Use `as const` |
+|---------------------|----------------|
+| Runtime immutability | Compile-time literal types |
+| Shared config object | Primitive arrays/literals |
+| Module-level constants | Type narrowing |
+| Both together for full protection: `Object.freeze({ ... } as const)` |
+
+**Note:** `freeze` is shallow. Need deep freeze for nested objects — use `lodash-es` `cloneDeep` + `freeze` or a deepFreeze utility.
+
 ## Red Flags
 
 - `await x()` without `try` above it — needs catch
