@@ -78,11 +78,35 @@ Personal Claude Code skill collection — 36+ skills covering React, Next.js, Ty
 ## Usage
 
 ```bash
+# 1. Clone + install third-party skills
 git clone https://github.com/haozhang46/hz-skills.git
 cd hz-skills
-./install.sh  # fetch 18 third-party skills
+./install.sh
+
+# 2. Install superpowers (engineering workflow skills)
+claude plugin add anthropic/superpowers
+
+# 3. Copy to your project
 cp -r . your-project/.claude/skills/
 ```
+
+**Superpowers** (install separately — plugin marketplace only):
+
+| Skill | Purpose |
+|-------|---------|
+| brainstorming | Design ideas through structured dialogue — must use before creative work |
+| writing-plans | Create implementation plans from specs |
+| subagent-driven-development | Execute plans via fresh subagent per task + two-stage review |
+| test-driven-development | Write test first, watch it fail, write minimal code |
+| systematic-debugging | Root cause tracing — before proposing fixes |
+| verification-before-completion | Evidence before assertions — run verification before claiming done |
+| requesting-code-review | Review completed work before merge |
+| receiving-code-review | Process review feedback with rigor |
+| finishing-a-development-branch | Structured merge/PR/cleanup after implementation |
+| using-git-worktrees | Isolated workspace for feature work |
+| writing-skills | Create skills via TDD (RED-GREEN-REFACTOR) |
+| dispatching-parallel-agents | Run independent tasks in parallel |
+| executing-plans | Execute plan in separate session with checkpoints |
 
 Third-party skills managed via `sources.yaml` + `install.sh` — not committed directly, upstream-updateable.
 

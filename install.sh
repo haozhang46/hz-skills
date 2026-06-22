@@ -56,7 +56,10 @@ git sparse-checkout set skills/webgpu-threejs-tsl
 cp -r skills/webgpu-threejs-tsl "$SCRIPT_DIR/webgpu-threejs-tsl"
 
 echo ""
-echo "Done. Installed 16 skills."
+echo "Done. Installed 18 third-party skills."
+echo ""
+echo "Next: install superpowers (engineering workflow — brainstorming, TDD, code review, etc.)"
+echo "  claude plugin add anthropic/superpowers"
 echo ""
 echo "Custom skills (already in repo):"
 echo "  bem-class-names-only  nextjs-hydration-rules  dto-mapper-layer"
