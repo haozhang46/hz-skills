@@ -102,9 +102,67 @@ async function fetchWithRetry<T>(url: string, retries = 2): Promise<T> {
 }
 ```
 
+## 6. File Download — responseType Blob, Not JSON
+
+```ts
+// ❌ default responseType='json' — corrupts binary files
+const res = await http.get('/files/report.pdf');
+
+// ✅ responseType: 'blob' for any file download
+const res = await http.get('/files/report.pdf', { responseType: 'blob' });
+
+// Trigger browser download
+const url = URL.createObjectURL(res.data);
+const a = document.createElement('a');
+a.href = url;
+a.download = filename;
+a.click();
+URL.revokeObjectURL(url);
+```
+
+| Data type | responseType |
+|-----------|-------------|
+| JSON API | `'json'` (default) |
+| File download | `'blob'` |
+| Raw text | `'text'` |
+| Binary processing | `'arraybuffer'` |
+
+## 7. Large File — Sliced Download with Range
+
+```ts
+async function downloadLargeFile(url: string, filename: string, onProgress?: (pct: number) => void) {
+  const head = await http.head(url);
+  const total = Number(head.headers['content-length']);
+  if (!total) throw new Error('Server must support Content-Length');
+
+  const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB
+  const chunks: Blob[] = [];
+  let downloaded = 0;
+
+  while (downloaded < total) {
+    const end = Math.min(downloaded + CHUNK_SIZE - 1, total - 1);
+    const res = await http.get(url, {
+      responseType: 'blob',
+      headers: { Range: `bytes=${downloaded}-${end}` },
+    });
+    chunks.push(res.data);
+    downloaded += res.data.size;
+    onProgress?.(Math.round((downloaded / total) * 100));
+  }
+  saveBlob(new Blob(chunks), filename);
+}
+```
+
+**Pitfalls:**
+- Server must return `Accept-Ranges: bytes`
+- Without `Content-Length`, can't calculate progress
+- CORS: server must expose `Content-Range` via `Access-Control-Expose-Headers`
+
 ## Red Flags
 
 - `axios.get('http://...')` with hardcoded URL — use the shared instance
 - `try/catch` around every call doing the same error handling — use interceptor
 - No `AbortController` on requests made in `useEffect` — memory leak on fast navigation
 - `fetch()` with no timeout wrapper — fetch has no built-in timeout
+- Download without `responseType: 'blob'` — silent corruption
+- Large file without `Range` header → memory OOM
