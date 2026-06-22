@@ -96,6 +96,60 @@ const apiUrl = import.meta.env.VITE_API_URL;
 
 **Key:** `tsc --noEmit` before build — catches type errors esbuild would skip.
 
+## 6. Chunk Splitting — Control Bundle Size
+
+Vite uses Rollup under the hood. Configure `output.manualChunks` in `vite.config.ts`:
+
+```ts
+// vite.config.ts
+export default defineConfig({
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          // Vendor chunks — split heavy deps from app code
+          react: ['react', 'react-dom'],
+          three: ['three'],
+          lodash: ['lodash-es'],
+          // Group related deps
+          ui: ['@blog/ui', '@blog/theme'],
+          // Everything else in node_modules → shared vendor chunk
+          vendor: ['ahooks', 'swr', 'gsap'],
+        },
+      },
+    },
+  },
+});
+```
+
+**Auto-chunk strategy (function form):**
+```ts
+manualChunks(id: string) {
+  // Split node_modules into per-package chunks
+  if (id.includes('node_modules')) {
+    if (id.includes('react') || id.includes('react-dom')) return 'react';
+    if (id.includes('three')) return 'three';
+    if (id.includes('lodash-es')) return 'lodash';
+    return 'vendor'; // rest of deps
+  }
+  // App code stays together (or split by route)
+}
+```
+
+| Strategy | Use |
+|----------|-----|
+| Named vendor chunks | Few large deps (React, Three.js, lodash) |
+| Function-based | Many deps, auto-group by package |
+| No manualChunks | Small projects — default is fine |
+
+**Split by route (lazy load pages):**
+```ts
+manualChunks(id: string) {
+  if (id.includes('pages/posts')) return 'posts';
+  if (id.includes('pages/about')) return 'about';
+}
+```
+
 ## Red Flags
 
 - `process.env.*` in client code → `import.meta.env.VITE_*`
