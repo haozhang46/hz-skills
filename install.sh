@@ -36,6 +36,18 @@ for skill in threejs-fundamentals threejs-geometry threejs-materials threejs-lig
   cp -r "skills/$skill" "$SCRIPT_DIR/$skill"
 done
 
+# --- Zustand Patterns ---
+echo "  → zustand-patterns"
+npx --yes skills add https://github.com/yonatangross/orchestkit --skill zustand-patterns --target "$SCRIPT_DIR/.temp-install" 2>/dev/null
+cp -rL "$SCRIPT_DIR/.temp-install/zustand-patterns" "$SCRIPT_DIR/zustand-patterns" 2>/dev/null || true
+rm -rf "$SCRIPT_DIR/.temp-install"
+
+# --- React Native Best Practices ---
+echo "  → react-native-best-practices"
+npx --yes skills add https://github.com/callstackincubator/agent-skills --skill react-native-best-practices --target "$SCRIPT_DIR/.temp-install" 2>/dev/null
+cp -rL "$SCRIPT_DIR/.temp-install/react-native-best-practices" "$SCRIPT_DIR/react-native-best-practices" 2>/dev/null || true
+rm -rf "$SCRIPT_DIR/.temp-install"
+
 # --- WebGPU Three.js TSL ---
 echo "  → webgpu-threejs-tsl"
 git clone --depth 1 --filter=blob:none --sparse https://github.com/dgreenheck/webgpu-claude-skill.git "$TMP/webgpu"

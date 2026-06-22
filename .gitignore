@@ -2,6 +2,8 @@
 vercel-react-best-practices/
 web-design-guidelines/
 planning-with-files/
+zustand-patterns/
+react-native-best-practices/
 threejs/
 threejs-fundamentals/
 threejs-geometry/
@@ -14,3 +16,4 @@ threejs-shaders/
 threejs-postprocessing/
 threejs-interaction/
 webgpu-threejs-tsl/
+.temp-install/
