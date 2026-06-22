@@ -5,9 +5,42 @@ description: Use when writing HTTP request code with axios or fetch — enforces
 
 # Axios / Fetch Conventions
 
-## 1. Unified Instance
+## 1. Never Raw fetch/axios in React Components
 
-Never call `axios.get()` or `fetch()` directly. Create a single configured instance.
+Always use a data-fetching library that manages loading, error, caching, and revalidation.
+
+```tsx
+// ❌ NEVER raw fetch in a component
+function Posts() {
+  const [posts, setPosts] = useState([]);
+  useEffect(() => { fetch('/api/posts').then(r => r.json()).then(setPosts); }, []);
+}
+
+// ❌ NEVER raw axios in a component
+function Posts() {
+  const [posts, setPosts] = useState([]);
+  useEffect(() => { http.get('/posts').then(r => setPosts(r.data)); }, []);
+}
+
+// ✅ useSWR
+const { data, error, isLoading } = useSWR('/api/posts', fetcher);
+
+// ✅ react-query / tanstack query
+const { data, error, isLoading } = useQuery({ queryKey: ['posts'], queryFn: fetchPosts });
+
+// ✅ ahooks useRequest
+const { data, error, loading } = useRequest(() => http.get('/posts'));
+```
+
+| Library | When |
+|---------|------|
+| `useSWR` | Already in the project, simple fetch + cache + revalidation |
+| `@tanstack/react-query` | Complex server state, mutations, pagination |
+| `ahooks` `useRequest` | Lightweight, already using ahooks for other hooks |
+
+## 2. Unified Instance
+
+Don't scatter `axios.get()` with inline URLs. Create a single configured instance.
 
 ```ts
 // lib/http.ts
@@ -20,7 +53,7 @@ export const http = axios.create({
 });
 ```
 
-## 2. Interceptors — Error Handling in One Place
+## 3. Interceptors — Error Handling in One Place
 
 ```ts
 // Response interceptor — normalize errors
@@ -38,7 +71,7 @@ http.interceptors.response.use(
 );
 ```
 
-## 3. Request Cancellation
+## 4. Request Cancellation
 
 Every request must pass a signal for cleanup.
 
@@ -52,7 +85,7 @@ useEffect(() => {
 }, []);
 ```
 
-## 4. Retry on Transient Failures
+## 5. Retry on Transient Failures
 
 ```ts
 async function fetchWithRetry<T>(url: string, retries = 2): Promise<T> {
