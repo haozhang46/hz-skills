@@ -166,3 +166,81 @@ async function downloadLargeFile(url: string, filename: string, onProgress?: (pc
 - `fetch()` with no timeout wrapper — fetch has no built-in timeout
 - Download without `responseType: 'blob'` — silent corruption
 - Large file without `Range` header → memory OOM
+
+## 8. SSE — Generator + Async Iteration for Streaming
+
+```ts
+// Backend (NestJS) — generator yields SSE chunks
+async *generateStream(prompt: string): AsyncGenerator<string> {
+  const stream = await openai.chat.completions.create({
+    model: 'gpt-4',
+    messages: [{ role: 'user', content: prompt }],
+    stream: true,
+  });
+  for await (const chunk of stream) {
+    yield chunk.choices[0]?.delta?.content ?? '';
+  }
+}
+
+// Express / NestJS SSE endpoint
+@Post('/chat/stream')
+async chatStream(@Body() body: ChatDto, @Res() res: Response) {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+
+  for await (const chunk of this.generateStream(body.prompt)) {
+    res.write(`data: ${JSON.stringify({ content: chunk })}\n\n`);
+  }
+  res.write('data: [DONE]\n\n');
+  res.end();
+}
+```
+
+**Frontend — consume SSE with fetch + ReadableStream:**
+```ts
+async function* consumeSSE(url: string, body: unknown): AsyncGenerator<string> {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`SSE error: ${res.status}`);
+  if (!res.body) throw new Error('No response body');
+
+  const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+  let buffer = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += value;
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+    for (const line of lines) {
+      if (line.startsWith('data: ')) {
+        const data = line.slice(6);
+        if (data === '[DONE]') return;
+        yield JSON.parse(data).content;
+      }
+    }
+  }
+}
+
+// Usage in React hook
+async function handleSend(prompt: string) {
+  for await (const chunk of consumeSSE('/api/chat/stream', { prompt })) {
+    setMessages((prev) => [...prev.slice(0, -1), { role: 'assistant', content: prev[prev.length - 1].content + chunk }]);
+  }
+}
+```
+
+**When to use SSE vs other patterns:**
+
+| Pattern | Use when |
+|---------|----------|
+| SSE + Generator | Server → client streaming text (AI chat, logs, progress) |
+| WebSocket | Bidirectional real-time (chat with user input, live collab) |
+| Polling (SWR `refreshInterval`) | Simple, stateless periodic refresh |
+| Chunked download (Range) | Large binary file, need progress + resume |
+
+**Key:** `for await (... of generator)` handles backpressure — consumer controls pace, server doesn't flood.
