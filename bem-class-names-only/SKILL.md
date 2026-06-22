@@ -132,27 +132,51 @@ import cn from 'classnames';
 
 Always use `classnames` or `clsx` for any conditional className. Template literals with ternaries are banned.
 
-## Red Flags — Immediate STOPS
+## Husky Enforcement — Block Tailwind Utilities in JSX
 
-- `flex`, `grid`, `p-4`, `m-2`, `gap-4` in className
-- `text-white`, `bg-gray-950`, `border-white/10` in className
-- `max-w-*`, `rounded-*`, `font-bold` in className
-- `[` or `]` in any className
-- `#` or `px` in any className
-- `className` with more than 2 space-separated values
+Add to `lint-staged` to catch violations pre-commit:
 
-**Any of these = DELETE and rewrite with BEM names.**
-
-## When to Use Multiple Classes
-
-Only for combining modifiers or states:
-
-```html
-<!-- ✅ OK — block + modifier -->
-<div className="post-card post-card--featured">
-
-<!-- ✅ OK — element + modifier -->
-<div className="scroll-indicator__segment scroll-indicator__segment--active">
+**`package.json`:**
+```json
+{
+  "lint-staged": {
+    "*.{tsx,jsx}": [
+      "prettier --write",
+      "node scripts/check-bem-classnames.mjs"
+    ]
+  }
+}
 ```
 
-Never chain unrelated utility classes. Each className tells WHAT this element IS, not HOW it looks.
+**`scripts/check-bem-classnames.mjs`:**
+```js
+#!/usr/bin/env node
+import { readFileSync } from 'fs';
+
+const PATTERNS = [
+  /\b(flex|grid|p-\d|m-\d|gap-\d|w-\d|h-\d|text-white|bg-gray|border-white|rounded-|font-bold|font-semibold|px-\d|py-\d|pt-\d|pb-\d|pl-\d|pr-\d|mt-\d|mb-\d|ml-\d|mr-\d|max-w-)\b/g,
+  /className="[^"]*\[[^\]]*\][^"]*"/,
+];
+
+let failed = false;
+for (const file of process.argv.slice(2)) {
+  if (!file.endsWith('.tsx') && !file.endsWith('.jsx')) continue;
+  const content = readFileSync(file, 'utf-8');
+  for (const pattern of PATTERNS) {
+    const matches = content.match(pattern);
+    if (matches) {
+      console.error(`  ${file}: Tailwind utility in className — ${matches.join(', ')}`);
+      failed = true;
+    }
+  }
+}
+if (failed) process.exit(1);
+```
+
+This catches:
+- Tailwind utility classes (`flex`, `grid`, `p-4`, `text-white`, etc.)
+- Arbitrary values (`bg-[#xxx]`, `max-w-[880px]`)
+
+**Also add `classnames`/`clsx` to allowed className patterns** — template ternary ban is handled by ESLint `no-restricted-syntax`.
+
+## Red Flags — Immediate STOPS
