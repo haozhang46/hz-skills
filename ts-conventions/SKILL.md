@@ -54,44 +54,72 @@ type AsyncState<T> =
   | { status: 'error'; error: string };
 ```
 
-## 3. Enum + useGetEnum Hook
+## 3. Centralized Enums + useGetEnum Hook
 
-Enums defined as const objects with a companion hook for UI labels:
+All enums live in one folder. The hook reads from there — no scattered enum definitions.
+
+```
+enums/
+├── index.ts          # re-export all
+├── post.ts           # PostStatus, PostCategory
+├── user.ts           # UserRole
+├── common.ts         # OrderDirection, Theme
+└── labels.ts         # all UI label mappings
+```
+
+**Define enum + labels together:**
 
 ```ts
-// types/post.ts
+// enums/post.ts
 export const PostStatus = {
   DRAFT: 'draft',
   PUBLISHED: 'published',
   ARCHIVED: 'archived',
 } as const;
-
 export type PostStatus = (typeof PostStatus)[keyof typeof PostStatus];
+
+// enums/labels.ts — centralized label map
+import { PostStatus } from './post';
+import { UserRole } from './user';
+
+export const ENUM_LABELS = {
+  PostStatus: {
+    [PostStatus.DRAFT]: 'Draft',
+    [PostStatus.PUBLISHED]: 'Published',
+    [PostStatus.ARCHIVED]: 'Archived',
+  },
+  UserRole: {
+    [UserRole.ADMIN]: 'Admin',
+    [UserRole.MEMBER]: 'Member',
+  },
+} as const;
 ```
+
+**The hook reads from centralized labels:**
 
 ```ts
 // hooks/useGetEnum.ts
+import { ENUM_LABELS } from '@/enums/labels';
+
 type EnumPair = [value: string, label: string];
 
-function useGetEnum<T extends Record<string, string>>(
-  enumObj: T,
-  labels: Record<T[keyof T], string>
+function useGetEnum<K extends keyof typeof ENUM_LABELS>(
+  enumName: K
 ): EnumPair[] {
-  return useMemo(
-    () => Object.values(enumObj).map((v) => [v, labels[v]] as EnumPair),
-    [enumObj, labels]
-  );
+  return useMemo(() => {
+    const labels = ENUM_LABELS[enumName];
+    return Object.entries(labels).map(([value, label]) => [value, label] as EnumPair);
+  }, [enumName]);
 }
 
-// Usage
-const STATUS_LABELS = { draft: 'Draft', published: 'Published', archived: 'Archived' };
-
+// Usage — just pass the enum name
 function PostFilter() {
-  const statusOptions = useGetEnum(PostStatus, STATUS_LABELS);
+  const statusOptions = useGetEnum('PostStatus');
   // [['draft', 'Draft'], ['published', 'Published'], ['archived', 'Archived']]
-  return statusOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>);
 }
 ```
+
+**Key rule:** Add enum → add labels in same commit. Hook doesn't take scattered label maps. Everything centralized.
 
 ## 4. No `any` — Use `unknown`
 
