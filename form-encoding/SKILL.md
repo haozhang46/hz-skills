@@ -26,44 +26,52 @@ const userInput = '<script>alert("xss")</script>';
 return <div>{userInput}</div>;   // 显示原文，不执行
 ```
 
-### 手动编码函数
+### 使用 `xss` npm 包（推荐代替手写）
 
-```js
-// 完整的 HTML entity 编码
-function encodeHtml(str) {
-  const map = {
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#39;',
-    '/': '&#x2F;',
-  };
-  return str.replace(/[&<>"'\/]/g, char => map[char]);
-}
-
-encodeHtml('<script>alert("xss")</script>');
-// → "&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;"
+```bash
+npm install xss
 ```
 
 ```js
-// 轻量版（只转义最关键的 5 个字符）
-function escapeHtml(str) {
-  const div = document.createElement('div');
-  div.appendChild(document.createTextNode(str));
-  return div.innerHTML;
-}
-// 利用 DOM API，浏览器帮你转义
+const xss = require('xss');
+
+// 过滤所有 HTML 标签（默认模式）
+xss('<script>alert(1)</script>');
+// → "&lt;script&gt;alert(1)&lt;/script&gt;"
+
+// 允许白名单标签
+xss('<b>加粗</b><script>alert(1)</script>', {
+  whiteList: { b: [], i: [], em: [], strong: [], a: ['href'] },
+});
+// → "<b>加粗</b>&lt;script&gt;alert(1)&lt;/script&gt;"
+
+// 自定义规则：过滤全部 HTML（纯文本模式）
+xss(userInput, { whiteList: {} });
+
+// stripIgnoreTag：保留标签体但去掉标签本身
+xss('<script>alert(1)</script>', { stripIgnoreTag: true });
+// → "alert(1)"
 ```
+
+**`xss` 包特点：**
+
+| 能力 | `xss` 包 | 手动转义 |
+|--|---------|-----------------|
+| `<script>` 转义 | ✅ | ✅ |
+| 事件属性（`onerror=`） | ✅ | ❌ |
+| `javascript:` 协议 | ✅ | ❌ |
+| CSS 注入 | ✅ | ❌ |
+| 白名单标签允许 | ✅ | ❌ |
+| 持续维护（CVE 跟进） | ✅ | ❌ |
 
 ### 什么时候需要手动编码
 
 ```tsx
 // ❌ 需要手动编码：dangerouslySetInnerHTML
-dangerouslySetInnerHTML={{ __html: encodeHtml(userInput) }}
+dangerouslySetInnerHTML={{ __html: xss(userInput) }}
 
 // ❌ 需要手动编码：HTML 模板拼接
-element.innerHTML = `<div>${encodeHtml(userInput)}</div>`
+element.innerHTML = `<div>${xss(userInput)}</div>`
 
 // ✅ 不需要：JSX 表达式
 <div>{userInput}</div>
@@ -93,7 +101,7 @@ const sanitized = DOMPurify.sanitize(userInput, {
 | 方式 | 允许 HTML | 性能 | 防护 |
 |------|-----------|------|------|
 | `{userInput}` (JSX) | ❌ 不允许 | 最快 | ✅ 完全 |
-| `encodeHtml(userInput)` | ❌ 不允许 | 快 | ✅ 完全 |
+| `xss(userInput)` | ❌ 不允许 | 快 | ✅ 完全 |
 | `DOMPurify.sanitize()` | ✅ 白名单标签 | 中 | ✅ 完全 |
 | `不做任何处理` | ✅ 全部 | 快 | ❌ XSS |
 
@@ -149,8 +157,8 @@ fetch('/api/upload', { method: 'POST', body: form });
 <img src={userInput} />
 <!-- 渲染后：<img src="" onfocus="alert(1)"> -->
 
-<!-- ✅ 属性用 encodeHtml 编码 -->
-<img src={encodeHtml(userInput)} />
+<!-- ✅ 属性用 xss 编码 -->
+<img src={xss(userInput)} />
 ```
 
 ### href / src 注入
@@ -192,7 +200,7 @@ element.innerHTML = DOMPurify.sanitize(userInput);
 |------|------|---------|
 | 不处理直接渲染 | 弹窗 | ❌ |
 | React `{input}` | 显示文本 | ✅ |
-| `encodeHtml(input)` | `&lt;script&gt;...` | ✅ |
+| `xss(input)` | `&lt;script&gt;...` | ✅ |
 | `encodeURIComponent(input)` | `%3Cscript%3E...` | ✅ |
 | `DOMPurify.sanitize(input)` | 空（script 不在白名单） | ✅ |
 | `JSON.stringify(input)` | `"<script>..."` | ✅ |
