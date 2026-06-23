@@ -35,19 +35,37 @@ VITE_APP_TITLE=MyApp
 # VITE_SECRET_KEY=  # 敏感值只写 key，不写占位值
 ```
 
-## scripts/setup-env.sh
+## scripts/setup-env.sh（占位模板）
+
+不同项目环境变量来源不同，脚本只提供骨架，按实际场景改。
 
 ```bash
 #!/bin/bash
 set -e
 
+# 示例：从 .env.example 复制
 if [ ! -f .env ]; then
   cp .env.example .env
-  echo "✅ 已创建 .env，请填入真实值后运行项目"
-else
-  echo "⏭ .env 已存在，跳过"
+  echo "✅ 已创建 .env，请填入真实值"
+fi
+
+# 可选：按参数选择环境
+# bash scripts/setup-env.sh prd → 用 .env.prd
+ENV=${1:-dev}
+if [ -f ".env.${ENV}" ]; then
+  cp ".env.${ENV}" .env
+  echo "✅ 已从 .env.${ENV} 创建 .env"
 fi
 ```
+
+**可能的实际场景（项目按需实现）：**
+
+| 场景 | 脚本行为 |
+|------|---------|
+| 小项目开发环境 | `cp .env.example .env` |
+| 多环境切换 | `bash scripts/setup-env.sh prd` → 用 `.env.prd` |
+| CI 拉取 Secret Manager | 调用内部 API 写入 `.env` |
+| Monorepo 多包 | 在 `packages/*` 下循环执行 |
 
 ## CI/生产环境通过 API 拉取
 
