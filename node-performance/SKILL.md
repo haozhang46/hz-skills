@@ -152,13 +152,25 @@ function process(items) {
   });
 }
 
-// ✅ 显式释放
+// 现代 V8 GC 是标记清除（mark-and-sweep），不是引用计数
+// 函数退出时局部变量自动回收，不需要手动设 null
 function process(items) {
   const largeData = new Array(1000000);
   items.forEach(item => {
     doSomething(item, largeData);
   });
-  largeData = null; // 释放引用
+  // largeData 在函数退出时自动 GC，不需要 largeData = null
+}
+
+// 真正需要手动释放的场景：全局缓存/闭包/长期引用的对象
+const cache = new Map();
+
+function addToCache(key, data) {
+  cache.set(key, data);
+}
+
+function cleanup() {
+  cache.clear(); // 长期缓存需要手动清
 }
 ```
 
