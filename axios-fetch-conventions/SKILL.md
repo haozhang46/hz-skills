@@ -87,26 +87,29 @@ http.interceptors.response.use(
 
 ## 4. Request Cancellation
 
-Every request must pass a signal for cleanup.
+> 如果用了 SWR / TanStack Query / ahooks，组件卸载自动取消，不需要手写 `AbortController`。
+> 以下方案只在**非请求库环境**（手动 `useEffect` + axios）时需要。
 
 ```ts
-// ✅ AbortController
-const controller = new AbortController();
-
+// 非请求库环境：手动取消
 useEffect(() => {
+  const controller = new AbortController();
   http.get('/posts', { signal: controller.signal });
-  return () => controller.abort(); // cleanup on unmount
+  return () => controller.abort();
 }, []);
 ```
 
 ## 5. Retry on Transient Failures
 
+> SWR: `errorRetryCount: 3` / TanStack Query: `retry: 3` / ahooks: `retryCount: 2`
+> 请求库自带重试，以下方案只在**非请求库环境**需要。
+
 ```ts
+// 非请求库环境：手动重试
 async function fetchWithRetry<T>(url: string, retries = 2): Promise<T> {
   for (let i = 0; i <= retries; i++) {
     try {
-      const { data } = await http.get<T>(url);
-      return data;
+      return (await http.get<T>(url)).data;
     } catch (err) {
       if (i === retries) throw err;
       await new Promise((r) => setTimeout(r, 1000 * (i + 1)));
