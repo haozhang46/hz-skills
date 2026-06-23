@@ -1,6 +1,6 @@
 ---
 name: font-loading
-description: 多国字体加载策略 — @font-face unicode-range 按需加载、font-display、CJK 字体子集化、语言字体栈、FOUT/FOIT 优化
+description: 多国字体加载策略 — @font-face unicode-range 按需加载、font-display、CJK 字体子集化、系统字体替代方案、UniApp 工程化实践
 ---
 
 # 多国字体加载
@@ -263,6 +263,169 @@ observer.observe(document.querySelector('.decorative-section'));
 ```
 
 ---
+
+## UniApp — 工程化方案：尽量不加载 CJK 字体
+
+### 前提：系统字体在移动端已经很好
+
+iOS 和 Android 都自带高质量 CJK 字体：
+
+| 平台 | 系统 CJK 字体 | 质量 |
+|------|-------------|------|
+| iOS | PingFang SC（苹方） | 系统级 hinting，渲染最佳 |
+| Android | Noto Sans CJK / Source Han Sans | 高质量开源 |
+| HarmonyOS | HarmonyOS Sans | 鸿蒙定制 |
+| 微信小程序 | 跟随系统 | — |
+
+**结论：系统字体已经足够好，加载自定义 CJK 字体的收益极小，代价极大。**
+
+### 「文字大小模拟」方案
+
+用系统字体 + 样式变化模拟不同字体的视觉效果：
+
+```css
+/* ❌ 加载自定义字体（CJK 10~20MB） */
+@font-face {
+  font-family: 'BrandFont';
+  src: url('/fonts/brand.ttf') format('truetype');
+}
+.title {
+  font-family: 'BrandFont';
+}
+
+/* ✅ 系统字体 + 样式模拟 */
+.title-h1 {
+  font-size: 48rpx;
+  font-weight: 700;     /* 字重模拟粗体 */
+  letter-spacing: 4rpx; /* 字距模拟不同气质 */
+  color: #333;
+}
+
+.title-h2 {
+  font-size: 32rpx;
+  font-weight: 600;
+  letter-spacing: 2rpx;
+  color: #666;
+}
+
+.body-text {
+  font-size: 28rpx;
+  font-weight: 400;
+  line-height: 1.6;
+  color: #999;
+}
+
+/* 通过组合实现视觉差异 */
+.title-emphasis {
+  font-size: 36rpx;
+  font-weight: 700;
+  background: linear-gradient(90deg, #667eea, #764ba2);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+```
+
+```vue
+<!-- ✅ UniApp 中用系统字体代替 -->
+<template>
+  <view>
+    <text class="title-h1">主标题（大号粗体）</text>
+    <text class="title-h2">副标题（中号中粗）</text>
+    <text class="body-text">正文（默认字重）</text>
+    <text class="title-emphasis">特色文字（渐变+粗体）</text>
+  </view>
+</template>
+```
+
+### 什么时候可以用自定义字体
+
+| 场景 | 是否可以加载 | 原因 |
+|------|------------|------|
+| 数字/英文品牌字体 | ✅ 可以加载 | Latin 字体通常 < 50KB |
+| CJK 正文/标题 | ❌ 不建议 | 10~20MB，收益极低 |
+| CJK 图标/Logo | ⚠️ 子集化后可用 | 只包含十几个字 |
+| 图标字体（iconfont） | ✅ 可以 | SVG/字体图标体积小 |
+
+```css
+/* ✅ 可以加载：只有数字和英文的品牌字体 */
+@font-face {
+  font-family: 'BrandDisplay';
+  src: url('/fonts/brand-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF; /* 只有 Latin，~20KB */
+  font-display: swap;
+}
+
+.brand-number {
+  font-family: 'BrandDisplay', sans-serif;
+}
+
+/* ⚠️ CJK Logo：只包含几个字，子集化后加载 */
+@font-face {
+  font-family: 'LogoFont';
+  src: url('/fonts/logo-subset.woff2') format('woff2');
+  /* 只包含 "某某科技" 四个字 */
+  unicode-range: U+67D0, U+67D0, U+79D1, U+6280;
+}
+```
+
+### UniApp 字体加载 API
+
+```vue
+<script>
+// 如果确实需要加载字体
+uni.loadFontFace({
+  family: 'MyFont',
+  source: 'url("/fonts/logo-subset.woff2")',
+  success: () => console.log('加载成功'),
+  fail: (err) => {
+    // 加载失败不影响使用（系统字体兜底）
+    console.warn('字体加载失败，使用系统字体', err);
+  },
+});
+</script>
+```
+
+> ⚠️ `uni.loadFontFace` 加载 CJK 全量字体（10~20MB）在弱网下会超时失败，且占用大量内存。再次强调：只用来加载子集化后的小字体。
+
+### 工程规范
+
+```scss
+// 设计稿用系统字体，不依赖自定义字体
+// 通过字号/字重/行高/字距/颜色 5 个维度实现视觉层级
+
+// 字号阶梯
+$font-xs: 20rpx;
+$font-sm: 24rpx;
+$font-base: 28rpx;
+$font-lg: 32rpx;
+$font-xl: 36rpx;
+$font-2xl: 44rpx;
+$font-3xl: 52rpx;
+
+// 字重
+$weight-regular: 400;
+$weight-medium: 500;
+$weight-semibold: 600;
+$weight-bold: 700;
+
+// 用法
+.title {
+  font-size: $font-2xl;
+  font-weight: $weight-bold;
+  letter-spacing: 2rpx;
+  color: #1a1a1a;
+}
+```
+
+### 总结
+
+**你的方向是对的：UniApp 中尽量不加载字体，用字号/字重/行高/字距/颜色模拟视觉差异。**
+
+- 系统 CJK 字体已经足够好
+- 自定义 CJK 字体 10~20MB，加载慢、占内存、收益低
+- Latin 字体很小（< 50KB），可以加载
+- CJK Logo 子集化后（~50KB）可以加载
+- 通过 5 个维度（字号、字重、行高、字距、颜色）实现丰富视觉层级
 
 ## Red Flags
 
