@@ -375,7 +375,9 @@ function ChatInput() {
 }
 ```
 
-> ⚠️ `multiline` 为 true 时 `returnKeyType` / `onSubmitEditing` 均不生效（RN 行为），Enter 由 `onKeyPress` 接管。#### Pattern C: Debounce — Stopped Typing (Auto-Save / Search)
+> ⚠️ `multiline` 为 true 时 `returnKeyType` / `onSubmitEditing` 均不生效（RN 行为），Enter 由 `onKeyPress` 接管。
+
+#### Pattern C: Debounce — Stopped Typing (Auto-Save / Search)
 
 No built-in `isComplete` prop on TextInput. Use debounce to detect when the user **stops typing** for a defined pause.
 
@@ -574,6 +576,137 @@ KeyboardController.setMode('nothing');
 
 ---
 
+## Custom Keyboard — 全量替换系统键盘
+
+适合 PIN 输入、数字金额、计算器、点单数量选择等场景。完全不使用原生键盘，用自定义 View 代替。
+
+### 方案 A: DIY — 最灵活跨平台
+
+核心思路：**不用 TextInput 做输入**，用 TouchableOpacity 触发自定义键盘面板，值存在 JS state 里。
+
+```tsx
+function PINKeyboard({ value, onChange, maxLength = 6 }) {
+  const handlePress = (key: string) => {
+    if (key === 'backspace') {
+      onChange(value.slice(0, -1));
+    } else if (key === 'clear') {
+      onChange('');
+    } else if (value.length < maxLength) {
+      onChange(value + key);
+    }
+  };
+
+  const keys = [
+    ['1', '2', '3'],
+    ['4', '5', '6'],
+    ['7', '8', '9'],
+    ['clear', '0', 'backspace'],
+  ];
+
+  return (
+    <View style={{ paddingBottom: insets.bottom }}>
+      {keys.map((row, i) => (
+        <View key={i} style={{ flexDirection: 'row' }}>
+          {row.map((key) => (
+            <TouchableOpacity
+              key={key}
+              style={{ flex: 1, height: 56, justifyContent: 'center', alignItems: 'center' }}
+              onPress={() => handlePress(key)}
+            >
+              <Text style={{ fontSize: 24 }}>
+                {key === 'backspace' ? '⌫' : key === 'clear' ? '清除' : key}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function PINInput() {
+  const [pin, setPin] = useState('');
+
+  return (
+    <View style={{ flex: 1, justifyContent: 'center' }}>
+      {/* 显示区域 */}
+      <View style={{ flexDirection: 'row', justifyContent: 'center', marginBottom: 40 }}>
+        {Array.from({ length: 6 }).map((_, i) => (
+          <View key={i} style={{
+            width: 16, height: 16, borderRadius: 8,
+            backgroundColor: pin[i] ? '#000' : '#ddd',
+            marginHorizontal: 8,
+          }} />
+        ))}
+      </View>
+
+      {/* 自定义键盘 */}
+      <PINKeyboard value={pin} onChange={setPin} />
+    </View>
+  );
+}
+```
+
+### 方案 B: TextInput + showSoftInputOnFocus (Android)
+
+如果既要 TextInput 的焦点管理能力、又不显示系统键盘：
+
+```tsx
+function CustomKeyboardInput() {
+  const inputRef = useRef<TextInput>(null);
+  const [value, setValue] = useState('');
+
+  const handleCustomKeyPress = (key: string) => {
+    if (key === 'backspace') {
+      setValue(v => v.slice(0, -1));
+    } else {
+      setValue(v => v + key);
+    }
+  };
+
+  return (
+    <View>
+      {/* 隐藏的 TextInput，只用来获取焦点但不弹键盘 */}
+      <TextInput
+        ref={inputRef}
+        showSoftInputOnFocus={false}   // Android: 聚焦时不弹系统键盘
+        style={{ height: 0, width: 0 }} // 彻底隐藏
+      />
+
+      {/* 显示区域 — 点击触发焦点 */}
+      <TouchableOpacity onPress={() => inputRef.current?.focus()}>
+        <Text style={{ fontSize: 24, letterSpacing: 8 }}>
+          {value || '点击输入'}
+        </Text>
+      </TouchableOpacity>
+
+      {/* 自定义键盘面板 */}
+      <CustomKeyboard onKeyPress={handleCustomKeyPress} />
+    </View>
+  );
+}
+```
+
+> ⚠️ `showSoftInputOnFocus` 是 Android 专有 prop。iOS 上没有等效 API，需要用方案 A 完全绕过 TextInput。
+
+### 方案 C: 第三方库
+
+| 库 | 场景 | 备注 |
+|---|------|------|
+| `react-native-keyboard-kit` | 通用自定义键盘 | Notifee 维护，支持自定义 keyboard view 替换系统键盘 |
+| `react-native-nice-keyboard` | 数字键盘 | 纯数字输入场景 |
+| `react-native-pure-keyboard` | 安全键盘 | 防截屏、防录屏的安全输入 |
+
+### 何时用哪种？
+
+| 场景 | 推荐方案 |
+|------|---------|
+| PIN / 密码输入 | **A** — DIY，无依赖，最可控 |
+| 数字金额输入 (Android) | **B** — `showSoftInputOnFocus`，保留焦点管理 |
+| 数字金额输入 (iOS) | **A** — iOS 不支持 showSoftInputOnFocus |
+| 安全输入（银行类） | **C** — `react-native-pure-keyboard`，自带防截屏 |
+| 复杂自定义布局（计算器、点单） | **A** — DIY，完全自由 |
+
 ## Combined Pattern — SafeArea + Keyboard
 
 ### 推荐方案：react-native-keyboard-controller
@@ -663,4 +796,5 @@ function FormScreen() {
 - ❌ Missing `Keyboard.dismiss()` in `onSubmitEditing` — keyboard stays open after submit on some platforms
 - ❌ CJK 输入法选字 Enter 误触 `onSubmitEditing` — 用 `nativeEvent.isComposing` 过滤，不需要手动维护 ref + `onCompositionStart/End`
 - ❌ `multiline` 下用了 `onSubmitEditing` / `returnKeyType` — 这两个 prop 对 multiline TextInput 不生效，改用 `onKeyPress` 拦截 Enter
+- ❌ iOS 上用了 `showSoftInputOnFocus={false}` — iOS 不支持此 prop，用 DIY View 方案替代
 - ❌ 混用 `KeyboardAvoidingView` (RN) + `keyboard-controller` 在同一页 — 只用其中一个即可
