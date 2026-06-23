@@ -633,7 +633,112 @@ border-radius: 50%;    /* 正圆形 */
 box-shadow: 0 2px 8px rgba(0,0,0,0.1);
 ```
 
----
+------
+
+## 按钮 / 卡片 — 不固定宽高，用 min + padding 撑开
+
+按钮、标签、卡片这类组件，**不设固定宽高**，由内容撑开 + `padding` 控制点击区域大小。
+
+### 正确做法
+
+```css
+/* ✅ 按钮：不设 width/height，padding 控制大小 */
+.btn {
+  display: inline-flex;           /* 宽度由内容决定 */
+  align-items: center;
+  justify-content: center;
+  min-width: 40px;                /* 最小宽度（防太窄） */
+  min-height: 32px;               /* 最小高度 */
+  padding: 6px 16px;              /* 水平 16px，垂直 6px */
+  font-size: 14px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  white-space: nowrap;            /* 文字不换行 */
+}
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;                    /* 方形图标按钮可以固定宽高 */
+  height: 32px;
+  padding: 0;                     /* 不需要 padding */
+}
+
+/* ✅ 标签 / Tag：内容撑开 */
+.tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  font-size: 12px;
+  border-radius: 4px;
+  /* 不设 width，完全由内容撑开 */
+}
+
+/* ✅ 卡片：内容撑开宽度，min 控制最窄 */
+.card {
+  display: flex;
+  flex-direction: column;
+  min-width: 280px;               /* 不低于 280px */
+  padding: 16px;
+  /* max-width 也可以加，防止太宽 */
+  max-width: 480px;
+}
+```
+
+### 为什么
+
+```css
+/* ❌ 固定宽高的问题 */
+.btn {
+  width: 120px;
+  height: 40px;
+  /* 文本太长时 → 截断或溢出 */
+  /* 文本太短时 → 多余空白 */
+  /* 多语言翻译后 → 布局崩 */
+}
+
+/* ✅ min + padding 的好处 */
+.btn {
+  min-width: 80px;          /* 最短 80px */
+  min-height: 32px;         /* 最低 32px */
+  padding: 6px 16px;        /* 控制内边距 */
+  /* 文本短时 = 80px */
+  /* 文本长时 = 自适应撑开 */
+  /* 翻译后不同长度 → 仍然自然 */
+}
+```
+
+### 什么时候用固定宽高
+
+```css
+/* ✅ 固定宽高：图标、头像、正方形 */
+.avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+/* ✅ 固定宽高：表格列、栅格系统 */
+.table-header {
+  width: 150px;              /* 列宽固定 */
+}
+
+/* ❌ 按钮、标签、卡片 → 不要固定宽高 */
+```
+
+### 总结
+
+| 组件 | width/height | 建议 |
+|------|-------------|------|
+| 按钮 | 不设 | `min-width` + `padding` 撑开 |
+| 标签 / Tag | 不设 | 内容撑开 + `padding` |
+| 卡片 | 不设 | `min-width` / `max-width` + `padding` |
+| 图标按钮 | 固定 | `width: 32px; height: 32px` |
+| 头像 | 固定 | `width: 40px; height: 40px` |
+| 输入框 | 不设宽 | 父级宽度或 `width: 100%` |
 
 ## Red Flags
 
