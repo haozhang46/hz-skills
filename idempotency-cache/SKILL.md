@@ -342,7 +342,214 @@ def get_user_with_local_cache(id):
 |------|------|------|---------|
 | 穿透 | 查不存在的数据 | DB 压力持续增加 | 空值缓存 / Bloom Filter |
 | 击穿 | 热点 key 过期 | DB 单点压力暴增 | 互斥锁 / 永不过期 + 异步刷新 |
-| 雪崩 | 大量 key 同时过期 / Redis 宕机 | DB 整体压力暴增 | TTL 随机 / 多级缓存 / 高可用 |
+| 雪崩 | 大量 key 同时过期 / Redis 宕机 | DB 整体压力暴增 | TTL 随机 / **多级缓存** / 高可用 |
+
+---
+
+## 多级缓存架构（Caffeine + Redis）
+
+高并发场景下的最优方案：**本地缓存（L1）→ 分布式缓存（L2）→ DB（L3）**，逐级回源。
+
+```
+                    ┌──────────────┐
+    请求  ──→       │  Caffeine     │  (L1, 本地内存, 纳秒级)
+                    │  (每台机器)   │
+                    └──────┬───────┘
+                           │ miss
+                    ┌──────▼───────┐
+                    │  Redis        │  (L2, 分布式, 毫秒级)
+                    └──────┬───────┘
+                           │ miss
+                    ┌──────▼───────┐
+                    │  MySQL        │  (L3, 持久化)
+                    └──────────────┘
+```
+
+### 为什么 Caffeine + Redis 是最优组合
+
+| 特性 | Caffeine (L1) | Redis (L2) | MySQL (L3) |
+|------|-------------|-----------|-----------|
+| 延迟 | 纳秒级（堆内） | 毫秒级（网络） | 毫秒~秒级（磁盘） |
+| 容量 | 几百 MB（JVM 堆） | GB~TB | TB 级 |
+| 共享 | 单机独有 | 全局共享 | 全局共享 |
+| 一致性 | 最终一致 | 最终一致 | 强一致 |
+
+**核心价值：** Redis 宕机时，Caffeine 仍然抗住大部分读请求，DB 不会被流量打死。解决缓存雪崩的终极方案。
+
+### 读取流程
+
+```java
+// Java Spring Boot 示例 — Caffeine + Redis 多级缓存
+@Service
+public class UserService {
+
+    @Autowired
+    private RedisTemplate<String, Object> redisTemplate;
+
+    private final Cache<String, User> localCache = Caffeine.newBuilder()
+        .maximumSize(10_000)                     // 最多 1 万条
+        .expireAfterWrite(30, TimeUnit.SECONDS)   // L1 短 TTL（30s）
+        .recordStats()                            // 开启命中率统计
+        .build();
+
+    public User getUser(Long id) {
+        String key = "user:" + id;
+
+        // 1️⃣ L1: Caffeine 本地缓存
+        User user = localCache.getIfPresent(key);
+        if (user != null) {
+            return user;
+        }
+
+        // 2️⃣ L2: Redis 分布式缓存
+        Object cached = redisTemplate.opsForValue().get(key);
+        if (cached != null) {
+            User redisUser = (User) cached;
+            // 回填 L1（异步，避免阻塞）
+            localCache.put(key, redisUser);
+            return redisUser;
+        }
+
+        // 3️⃣ L3: MySQL 回源（加分布式锁防止击穿）
+        String lockKey = "lock:" + key;
+        RLock lock = redissonClient.getLock(lockKey);
+        lock.lock(5, TimeUnit.SECONDS);
+        try {
+            // 双重检查（DCL）：拿到锁后再查一次缓存
+            cached = redisTemplate.opsForValue().get(key);
+            if (cached != null) {
+                return (User) cached;
+            }
+
+            user = userMapper.selectById(id);
+            if (user == null) {
+                // 空值标记，防穿透（短 TTL）
+                redisTemplate.opsForValue().set(key, null, 120, TimeUnit.SECONDS);
+                return null;
+            }
+
+            // 回填 L2 + L1
+            redisTemplate.opsForValue().set(key, user, 1, TimeUnit.HOURS);
+            localCache.put(key, user);
+            return user;
+        } finally {
+            lock.unlock();
+        }
+    }
+}
+```
+
+### 写入流程
+
+```java
+public void updateUser(Long id, UserUpdateDTO dto) {
+    String key = "user:" + id;
+
+    // 1. 更新 MySQL
+    userMapper.updateById(id, dto);
+
+    // 2. 删除 L2 (Redis)
+    redisTemplate.delete(key);
+
+    // 3. 删除 L1 (Caffeine) — 注意：本地缓存不共享，需通知其他机器
+    localCache.invalidate(key);
+
+    // 4. 可选：MQ 广播给其他机器删除它们的 L1
+    // rocketMQTemplate.send("cache-invalidate-topic", key);
+}
+```
+
+### L1 缓存一致性问题
+
+Caffeine 是**本地缓存**，每台机器各存一份。A 机器更新了数据，B 机器的 L1 还是旧的。
+
+| 方案 | 一致性 | 复杂度 | 适用 |
+|------|--------|--------|------|
+| L1 TTL 设短（30s） | 最终一致（30s 内） | 无 | ✅ 推荐，大多数场景够用 |
+| MQ 广播失效 | 准实时 | 中 | 一致性要求高的场景 |
+| Redis Pub/Sub 通知 | 准实时 | 中 | 轻量广播 |
+| 不设 L1，只用 L2 | 强一致 | 无 | 一致性 > 性能 |
+
+**推荐：** Caffeine TTL 设 30~60s + 写入时 delete L1。这样最多有 30s 窗口读到旧数据，但对大多数业务可以接受。如果不行，加 MQ 广播。
+
+### Caffeine 配置最佳实践
+
+```java
+Cache<String, User> cache = Caffeine.newBuilder()
+    .maximumSize(10_000)                  // 最大条数（不是内存），防止 OOM
+    .expireAfterWrite(30, TimeUnit.SECONDS) // 写入后 30s 过期
+    // .expireAfterAccess(10, TimeUnit.SECONDS) // 10s 不访问就过期（适合低频数据）
+    // .refreshAfterWrite(20, TimeUnit.SECONDS) // 20s 后异步刷新（不阻塞读）
+    .recordStats()                         // 打开统计，监控命中率
+    .removalListener((key, value, cause) -> {
+        log.info("Cache evict: key={}, cause={}", key, cause);
+    })
+    .build();
+```
+
+| 参数 | 推荐值 | 说明 |
+|------|--------|------|
+| `maximumSize` | 5000~50000 | 按业务数据量设，不是越大越好 |
+| `expireAfterWrite` | 30~60s | L1 TTL 够短，一致性窗口可控 |
+| `refreshAfterWrite` | 20s | 配合 expire，20s 后异步刷新，读请求不阻塞 |
+| `recordStats` | 开启 | 监控命中率，低于 80% 说明 TTL 太长或容量太小 |
+
+### 多级缓存监控
+
+```bash
+# JMX 查看 Caffeine 命中率（Spring Boot Actuator）
+GET /actuator/caches
+# 返回每个 Cache 的 hitRate, missRate, loadTime, evictionCount
+
+# Redis 命中率
+redis-cli INFO stats
+# keyspace_hits / (keyspace_hits + keyspace_misses) = 命中率
+
+# 监控指标
+# L1 命中率 > 80%  → 缓存有效
+# L1 命中率 < 50%  → TTL 太短或容量太小，调整配置
+# L2 命中率 > 90%  → 缓存有效
+# L2 命中率 < 70%  → 考虑加 L1 或优化 key 设计
+```
+
+### 降级策略
+
+```java
+public User getUserWithDegrade(Long id) {
+    try {
+        return getUser(id);                   // 正常三级
+    } catch (RedisException e) {
+        // L2 降级：跳过 Redis，L1 → DB
+        log.warn("Redis degrade, fallback to L1+DB");
+        User user = localCache.getIfPresent(key);
+        if (user != null) return user;
+        return userMapper.selectById(id);
+    } catch (Exception e) {
+        // L1+L2 完全降级：只查 DB（限流保护）
+        log.error("Cache degrade, fallback to DB with rate limit");
+        if (rateLimiter.tryAcquire()) {
+            return userMapper.selectById(id);
+        }
+        throw new ServiceException("服务繁忙");
+    }
+}
+```
+
+### 架构总结
+
+```
+正常:  Caffeine → Redis → MySQL
+L2 降级: Caffeine → MySQL（Redis 挂了）
+L1+L2 降级: MySQL（限流保护）
+全链路降级: 返回兜底数据 / 错误提示
+```
+
+| 场景 | 表现 | 应对 |
+|------|------|------|
+| Redis 宕机 | L2 不可用，L1 仍然命中 | -> L1 抗大部分读，DB 压力可控 |
+| Redis + L1 都 miss | 请求打到 DB | -> 限流 + 熔断保护 DB |
+| 热点 key 百万 QPS | L1 在每台机器缓存热点，单机几百 QPS → 每台 L1 命中 | -> DB 零压力 |
+| 数据更新 | L1 TTL 30s 内最终一致 | -> 广播 MQ 可缩短窗口 |
 
 ---
 
