@@ -702,28 +702,105 @@ function CustomKeyboardInput() {
 iOS 原生 `secureTextEntry` 安全键盘的**按键圆角无法自定义**，和你的 UI 设计可能不一致。所以默认推荐用 **方案 A (DIY)**：
 
 ```tsx
-// ✅ 默认安全键盘 — DIY，圆角/直角完全由你控制，跨平台一致
-function SecurePINInput() {
-  const [pin, setPin] = useState('');
+// ✅ 自定义安全键盘 — 按键内容完全由你控制
+// 可以纯数字（PIN）、字母+数字（密码）、自定义符号
+
+type KeyRow = { label: string; value: string }[];
+
+function SecureKeyboard({ value, onChange, maxLength, keys, shuffle }: {
+  value: string;
+  onChange: (v: string) => void;
+  maxLength: number;
+  keys?: KeyRow[];                       // 自定义按键布局
+  shuffle?: boolean;
+  keyStyle?: ViewStyle;                  // 按键自定义样式（圆角等）
+}) {
+  const handlePress = (k: string) => {
+    if (k === 'backspace') return onChange(value.slice(0, -1));
+    if (k === 'clear') return onChange('');
+    if (value.length >= maxLength) return;
+    onChange(value + k);
+  };
+
+  // 默认布局 — 纯数字 PIN
+  const defaultKeys: KeyRow[] = shuffle
+    ? [shuffleArray(['1','2','3']), shuffleArray(['4','5','6']),
+       shuffleArray(['7','8','9']), ['clear', shuffleArray(['0'])[0], 'backspace']]
+    : [['1','2','3'], ['4','5','6'], ['7','8','9'], ['clear','0','backspace']];
+
+  const rows = keys ?? defaultKeys;
 
   return (
-    <View style={{ flex: 1 }}>
-      {/* 6 位圆点显示 */}
-      <Dots value={pin} length={6} />
-
-      {/* 自定义安全键盘 — 按键样式完全可控 */}
-      <SecureKeyboard
-        value={pin}
-        onChange={setPin}
-        maxLength={6}
-        keyStyle={{ borderRadius: 0 }}   // 直角
-        // keyStyle={{ borderRadius: 12 }} // 自定义圆角
-        shuffle                        // 乱序排列（安全键盘特性）
-      />
+    <View>
+      {rows.map((row, i) => (
+        <View key={i} style={{ flexDirection: 'row' }}>
+          {row.map((k) => (
+            <TouchableOpacity key={k.label ?? k}
+              style={[{ flex: 1, height: 56, justifyContent: 'center', alignItems: 'center' }, keyStyle]}
+              onPress={() => handlePress(k.value ?? k)}
+            >
+              <Text style={{ fontSize: 24 }}>
+                {k.label ?? (k === 'backspace' ? '⌫' : k === 'clear' ? '清除' : k)}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      ))}
     </View>
   );
 }
+
+// 纯数字 PIN
+function SecurePINInput() {
+  const [pin, setPin] = useState('');
+  return (
+    <View style={{ flex: 1 }}>
+      <Dots value={pin} length={6} />
+      <SecureKeyboard value={pin} onChange={setPin} maxLength={6}
+        keyStyle={{ borderRadius: 0 }} shuffle />
+    </View>
+  );
+}
+
+// 字母+数字 安全密码键盘
+function SecurePasswordInput() {
+  const [pwd, setPwd] = useState('');
+  const alphaKeys: KeyRow[] = [
+    ['Q','W','E','R','T','Y','U','I','O','P'],
+    ['A','S','D','F','G','H','J','K','L'],
+    ['Z','X','C','V','B','N','M','backspace'],
+    ['clear',' ','done'],
+  ].map(row => row.map(k => ({ label: k, value: k })));
+
+  return (
+    <View style={{ flex: 1 }}>
+      <Dots value={pwd} length={8} />
+      <SecureKeyboard value={pwd} onChange={setPwd} maxLength={8}
+        keys={alphaKeys}
+        keyStyle={{ borderRadius: 0 }} />
+    </View>
+  );
+}
+
+// 自定义符号键盘（如交易密码 + 金额键盘）
+function CustomSymbolInput() {
+  const [val, setVal] = useState('');
+  const symbolKeys: KeyRow[] = [
+    ['1','2','3','+'],
+    ['4','5','6','-'],
+    ['7','8','9','.'],
+    ['clear','0','backspace','done'],
+  ].map(row => row.map(k => ({ label: k, value: k })));
+
+  return <SecureKeyboard value={val} onChange={setVal} maxLength={10} keys={symbolKeys} />;
+}
 ```
+
+> **关键点：** 因为是纯 View 实现，**输入内容完全不受限制**。
+> - `keys` prop 传入任意 KeyRow[]，就可以渲染数字、字母、符号、中文等各种按键
+> - `shuffle` 乱序适用于安全键盘（防偷窥）
+> - 每个按键的样式（圆角、颜色、字体）完全由你控制
+> - 适合各种金融安全输入场景（PIN、交易密码、支付金额等）
 
 > ⚠️ **iOS 原生 `secureTextEntry` 的限制：**
 > - 按键圆角（corner radius）不可修改
