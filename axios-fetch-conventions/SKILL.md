@@ -397,3 +397,93 @@ http.interceptors.request.use((config) => {
   return config;
 });
 ```
+
+---
+
+## 10. React 请求库 + axios 结合
+
+把统一的 axios 实例传给请求库，让请求库管理 loading/cache/状态，axios 实例管理拦截器/超时/取消。
+
+### useSWR + axios
+
+```ts
+// lib/http.ts — 统一实例（拦截器、超时已配置）
+import http from './http';
+
+// fetcher 用 axios 实例
+const fetcher = (url: string) => http.get(url).then(res => res.data);
+
+// 组件中使用
+function UserProfile({ id }: { id: number }) {
+  const { data, error, isLoading } = useSWR(`/api/users/${id}`, fetcher);
+
+  // 请求取消 — SWR 自动处理（组件卸载时 abort）
+  return <div>{data?.name}</div>;
+}
+```
+
+### TanStack Query + axios
+
+```ts
+import { useQuery, useMutation } from '@tanstack/react-query';
+import http from './http';
+
+// fetcher 绑定 axios
+const queryClient = new QueryClient();
+
+function Posts() {
+  const { data, isLoading } = useQuery({
+    queryKey: ['posts'],
+    queryFn: () => http.get('/posts').then(r => r.data),
+    // staleTime 控制缓存时效
+    staleTime: 30_000,         // 30s 内不重新请求
+    gcTime: 5 * 60_000,        // 5min 后回收缓存
+  });
+
+  const createMutation = useMutation({
+    mutationFn: (body: { title: string }) =>
+      http.post('/posts', body).then(r => r.data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['posts'] });
+    },
+  });
+
+  return <button onClick={() => createMutation.mutate({ title: 'New' })}>创建</button>;
+}
+```
+
+### ahooks useRequest + axios
+
+```ts
+import { useRequest } from 'ahooks';
+import http from './http';
+
+function SearchInput() {
+  const { data, loading, run, cancel } = useRequest(
+    (keyword: string) => http.get('/api/search', { params: { q: keyword } }).then(r => r.data),
+    {
+      debounceWait: 300,            // 防抖 300ms
+      manual: true,                  // 手动触发
+      retryCount: 2,                 // 失败重试 2 次
+      cancelOnLeave: true,           // 组件卸载取消
+    },
+  );
+
+  return (
+    <input
+      onChange={(e) => run(e.target.value)}
+      onBlur={cancel}
+    />
+  );
+}
+```
+
+### 关键整合点
+
+| 请求库 | axios 实例角色 | 取消机制 | 重试机制 |
+|--------|---------------|---------|---------|
+| useSWR | fetcher 用 `http.get` | SWR 自动 abort | SWR `errorRetryCount` |
+| TanStack Query | queryFn 用 `http.get` | `signal` 传入 axios | `retry` 配置项 |
+| ahooks useRequest | requestFn 用 `http.get` | `cancelOnLeave` | `retryCount` |
+
+**核心：axios 实例只负责「发请求 + 拦截器 + 超时」，请求库只负责「状态管理 + 缓存 + 生命周期」。两者各司其职，不重复实现对方的功能。**
