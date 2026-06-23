@@ -1320,6 +1320,102 @@ CSS `1px` 在 2x/3x Retina 屏上等于 **2~3 物理像素**，看着粗。真 1
 
 ---
 
+## position: sticky — 能用就不要自己算
+
+粘性定位（`sticky`）是纯 CSS 实现，比 JS 监听 scroll 事件自己算高效得多。
+
+```css
+/* ✅ sticky — 纯 CSS，浏览器原生优化 */
+.sticky-header {
+  position: sticky;
+  top: 0;                     /* 滚动到顶部时固定 */
+  z-index: var(--z-sticky);  /* 盖住滚动内容 */
+  background: #fff;
+}
+
+/* ❌ 不要自己算 — 性能差、卡顿、容易出 bug */
+let prevScroll = 0;
+window.addEventListener('scroll', () => {
+  const header = document.querySelector('.header');
+  if (window.scrollY > 100) {
+    header.classList.add('fixed');   // ❌ 频繁触发回流
+  }
+});
+```
+
+### 使用场景
+
+```css
+/* 粘性导航栏 */
+.nav {
+  position: sticky;
+  top: 0;
+}
+
+/* 粘性侧边栏（在父容器范围内固定） */
+.sidebar {
+  position: sticky;
+  top: 100px;                 /* 离顶部 100px 时开始固定 */
+}
+
+/* 粘性表头 */
+thead th {
+  position: sticky;
+  top: 0;
+  background: #f5f5f5;
+}
+
+/* 粘性分组标题 */
+.section-title {
+  position: sticky;
+  top: 0;                     /* 滚动到该组时标题固定，下一组顶上来 */
+}
+```
+
+### sticky 方向
+
+```css
+.sticky-top {
+  position: sticky;
+  top: 0;           /* 顶部固定 */
+}
+
+.sticky-bottom {
+  position: sticky;
+  bottom: 0;        /* 底部固定（如底部工具栏） */
+}
+```
+
+### 注意要点
+
+```css
+/* ⚠️ sticky 在父容器范围内生效，父容器滚出视口时 sticky 也跟着走 */
+.parent {
+  height: 200vh;               /* 父容器高度够大 */
+}
+.sticky-child {
+  position: sticky;
+  top: 0;                     /* 只在父容器内固定 */
+  /* 父容器滚出视口 → sticky 也跟着走 */
+}
+
+/* ⚠️ 父容器 overflow: hidden 会破坏 sticky */
+.parent { overflow: hidden; }  /* ❌ 让 sticky 失效 */
+.parent { overflow: visible; } /* ✅ 让 sticky 正常工作 */
+```
+
+| 场景 | 方案 | 推荐 |
+|------|------|------|
+| 导航栏随滚动固定 | `sticky` | ✅ 首选 |
+| 侧边栏跟随 | `sticky` | ✅ 首选 |
+| 表格表头固定 | `sticky` | ✅ 首选 |
+| 需要复杂的动画/交互 | 自行 JS 计算 | ⚠️ 必要时才用 |
+| 兼容非常旧的浏览器 | JS 计算兜底 | ⚠️ |
+
+> **能用 `position: sticky` 就不要自己用 JS 算 scroll 来模拟粘性。** 浏览器原生支持、不触发回流、60fps 流畅。
+
+---
+
 ## Red Flags
 
 - ❌ 多列列表用 `flex-wrap` + `width: calc()` — 换 Grid 一行搞定
