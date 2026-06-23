@@ -553,6 +553,18 @@ L1+L2 降级: MySQL（限流保护）
 
 ---
 
+## Redis 高可用完整方案
+
+> 🚧 **待补充** — 哨兵 Sentinel、Cluster 集群、生产落地细节
+>
+> 覆盖内容计划：
+> - 哨兵模式（Sentinel）：架构、选主、脑裂、客户端配置
+> - Cluster 集群：分片策略（16384 slots）、resharding、moved/ask 重定向
+> - 生产落地：持久化策略（RDB/AOF 混搭）、内存淘汰（LRU/LFU）、大 key 治理
+> - 监控：Redis INFO、slowlog、latency monitor、内存分析（redis-rdb-tools / RDR）
+
+---
+
 ## 幂等 + 缓存最佳实践
 
 ```
