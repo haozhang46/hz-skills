@@ -177,28 +177,134 @@ SET GLOBAL slow_query_log_file = '/var/log/mysql/slow.log';
 pt-query-digest /var/log/mysql/slow.log
 ```
 
-### 常见 SQL 优化
+### LIKE 与模糊查询
+
+#### LIKE 的三种匹配及索引行为
 
 ```sql
--- ❌ 函数导致索引失效
-WHERE DATE(created_at) = '2024-01-01';
--- ✅ 改用范围查询
-WHERE created_at >= '2024-01-01' AND created_at < '2024-01-02';
-
--- ❌ 隐式类型转换
-WHERE phone = 13800138000;      -- phone 是 VARCHAR
--- ✅ 同类型比较
-WHERE phone = '13800138000';
-
--- ❌ 前置通配符不走索引
-WHERE name LIKE '%keyword%';
--- ✅ 后缀通配符走索引
+-- ✅ 前缀匹配 — 走索引（B+Tree 按前缀范围扫描）
 WHERE name LIKE 'keyword%';
+-- EXPLAIN: type=range, key=idx_name（走索引范围扫描）
 
--- ❌ OR 可能导致索引失效
-WHERE status = 1 OR status = 2;
--- ✅ 用 IN / UNION
-WHERE status IN (1, 2);
+-- ❌ 后缀匹配 — 不能走索引，全表扫
+WHERE name LIKE '%keyword';
+-- EXPLAIN: type=ALL（全表扫）
+
+-- ❌ 中间匹配 — 不能走索引，全表扫
+WHERE name LIKE '%keyword%';
+-- EXPLAIN: type=ALL（全表扫）
+
+-- ❌ 前后通配全表扫，扫描行数 = 全表行数
+SELECT COUNT(*) FROM articles WHERE title LIKE '%keyword%';
+```
+
+**原理：** B+Tree 索引按字符顺序组织，`keyword%` 可以在索引树上做范围扫描（`key` ≤ x < `keyz`）。`%keyword` 不知道前缀是什么，只能全索引扫描或全表扫。
+
+#### 覆盖索引缓解（不是解决）
+
+```sql
+-- 如果查询字段全部在索引里，即使 LIKE '%x%' 也只用扫索引不用回表
+-- 索引 (title, id, status) 覆盖了 SELECT title, id, status
+SELECT id, title, status FROM articles WHERE title LIKE '%keyword%';
+-- Extra: Using where; Using index  （只扫索引，不碰数据行）
+-- 比全表扫快，但索引扫描仍然要遍历整个索引
+```
+
+#### 全文索引 FULLTEXT（替代 LIKE %keyword%）
+
+MySQL 5.6+ 支持全文索引，适合中等规模的文本搜索（不适合 ES 那种大规模）。
+
+```sql
+-- 创建全文索引
+ALTER TABLE articles ADD FULLTEXT INDEX ft_title_content (title, content);
+
+-- 自然语言模式（默认，按相关性排序）
+SELECT id, title, MATCH(title, content) AGAINST('mysql keyword' IN NATURAL LANGUAGE MODE) AS score
+FROM articles
+WHERE MATCH(title, content) AGAINST('mysql keyword' IN NATURAL LANGUAGE MODE)
+ORDER BY score DESC;
+
+-- 布尔模式（支持 +-*/@ 操作符）
+-- + 必须包含, - 不包含, * 通配符, "" 精确短语
+SELECT id, title FROM articles
+WHERE MATCH(title, content) AGAINST('+mysql -oracle' IN BOOLEAN MODE);
+
+-- 精确短语
+SELECT id, title FROM articles
+WHERE MATCH(title, content) AGAINST('"database design"' IN BOOLEAN MODE);
+
+-- 高亮关键词（MySQL 5.7+）
+SELECT id, title,
+  CONCAT(SUBSTRING(content, GREATEST(LOCATE('mysql', content) - 50, 0), 150)) AS snippet
+FROM articles
+WHERE MATCH(title, content) AGAINST('mysql' IN NATURAL LANGUAGE MODE);
+```
+
+**全文索引限制：**
+| 限制 | 说明 |
+|------|------|
+| 最短词长度 | `innodb_ft_min_token_size` 默认 3（英文），中文无效 |
+| 停用词 | 默认过滤常见词（the, and 等），可自定义 |
+| 中文分词 | 原生不支持中文分词，需 ngram 插件 |
+| 性能 | 适合百万级，千万级用 ES/Meilisearch |
+
+#### 中文全文搜索（ngram 解析器）
+
+```sql
+-- 建表时指定 ngram 分词（MySQL 5.7.6+）
+CREATE TABLE articles (
+  id    INT AUTO_INCREMENT PRIMARY KEY,
+  title VARCHAR(200),
+  content TEXT,
+  FULLTEXT INDEX ft_content (content) WITH PARSER ngram
+) ENGINE=InnoDB;
+
+-- 或修改已有全文索引
+ALTER TABLE articles DROP INDEX ft_content;
+ALTER TABLE articles ADD FULLTEXT INDEX ft_content (content) WITH PARSER ngram;
+
+-- 设置分词粒度（默认 2，改完需重建索引）
+SET GLOBAL ngram_token_size = 2;
+```
+
+> ⚠️ ngram 词粒度 = 2 时「数据库」被拆成「数据」「据库」，搜「数据」能命中。粒度越小结果越多但噪声越大。
+
+#### 搜索引擎替代方案
+
+```sql
+-- MySQL LIKE 能解决的问题边界
+-- ✅ 前缀匹配：商品 SKU 搜索 ('sku-001%')
+-- ✅ 精确匹配：用户名搜索 (WHERE name = 'john')
+-- ✅ 简单模糊查询：数据量 < 百万
+-- ❌ 全文搜索：文章、评论、商品搜索（用 Elasticsearch）
+-- ❌ 中文分词：标题、描述（用 ES + IK 分词器 / Meilisearch）
+-- ❌ 拼写纠错、同义词扩展、语义搜索（用 ES）
+-- ❌ 毫秒级实时搜索（用 ES / Meilisearch）
+```
+
+| 场景 | 方案 | 备注 |
+|------|------|------|
+| SKU/编号前缀匹配 | `LIKE 'prefix%'` + 索引 | ✅ 足够 |
+| 用户名/邮箱精确搜索 | `WHERE name = ?` + 索引 | ✅ 足够 |
+| 文章/商品简单搜索 | `FULLTEXT + ngram` | ⚠️ 百万级够用 |
+| 电商全站搜索 | Elasticsearch + IK | ✅ 分词、排序、聚合 |
+| 快速轻量搜索 | Meilisearch | ✅ 开箱即用、中文友好 |
+| 日志搜索 | ClickHouse / Elasticsearch | ✅ 时间序列 + 全文 |
+
+#### EXPLAIN 识别 LIKE 性能问题
+
+```sql
+-- 好：走索引范围扫描
+EXPLAIN SELECT * FROM users WHERE name LIKE 'john%';
+-- type: range, key: idx_name, rows: 几十
+
+-- 差：全表扫
+EXPLAIN SELECT * FROM users WHERE name LIKE '%john%';
+-- type: ALL, key: NULL, rows: 整个表
+
+-- 差：前缀匹配但排序列不在索引里
+EXPLAIN SELECT * FROM users WHERE name LIKE 'john%' ORDER BY created_at;
+-- Extra: Using index condition; Using filesort
 ```
 
 ---
