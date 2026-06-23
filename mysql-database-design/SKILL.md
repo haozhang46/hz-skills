@@ -99,6 +99,174 @@ ALTER TABLE users MODIFY COLUMN nickname VARCHAR(100) NOT NULL;
 
 ---
 
+## 表关系设计原理
+
+### 三种关系
+
+#### 一对一（1:1）
+
+用户 ↔ 用户档案、订单 ↔ 发票
+
+```sql
+CREATE TABLE user_profile (
+  user_id   BIGINT UNSIGNED PRIMARY KEY,  -- 与 users.id 一一对应
+  avatar    VARCHAR(255),
+  bio       TEXT,
+  FOREIGN KEY (user_id) REFERENCES users(id)
+);
+```
+
+**设计要点：**
+- 从表的主键就是外键（`user_id` 同时是 PK 和 FK）
+- 或者从表用自增 ID + 唯一外键（`UNIQUE INDEX idx_user_id`）
+- 不常用，大多数 1:1 可以直接合并到主表，除非字段访问频率差异大
+
+#### 一对多（1:N）
+
+用户 → 订单、分类 → 商品
+
+```sql
+CREATE TABLE orders (
+  id      BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  user_id BIGINT UNSIGNED NOT NULL,          -- 外键，指向 users.id
+  amount  DECIMAL(10,2) NOT NULL,
+  INDEX idx_user_id (user_id)                -- 必建索引
+);
+```
+
+**设计要点：**
+- 外键建在**多**的那张表（orders.user_id）
+- **被驱动表的外键列必须建索引**（否则 JOIN 全表扫）
+- 索引名规范：`idx_被引用表_列名`（`idx_user_id`）
+
+#### 多对多（N:N）— 中间表
+
+学生 ↔ 课程、用户 ↔ 角色、商品 ↔ 标签
+
+```sql
+CREATE TABLE student_course (
+  student_id BIGINT UNSIGNED NOT NULL,
+  course_id  BIGINT UNSIGNED NOT NULL,
+  PRIMARY KEY (student_id, course_id),       -- 复合主键
+  INDEX idx_course_id (course_id)            -- 反向查询索引
+);
+```
+
+### 中间表设计原则
+
+#### 复合主键 vs 自增 ID
+
+```sql
+-- ✅ 推荐：复合主键（唯一约束天然满足，省一次索引）
+CREATE TABLE user_role (
+  user_id BIGINT UNSIGNED NOT NULL,
+  role_id BIGINT UNSIGNED NOT NULL,
+  PRIMARY KEY (user_id, role_id)
+);
+-- 不允许同一个用户有重复角色
+
+-- ❌ 不推荐：自增 ID + 唯一索引（多一个无意义的列）
+CREATE TABLE user_role (
+  id      BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,  -- 无意义
+  user_id BIGINT UNSIGNED NOT NULL,
+  role_id BIGINT UNSIGNED NOT NULL,
+  UNIQUE INDEX uk_user_role (user_id, role_id)          -- 冗余
+);
+```
+
+| | 复合主键 | 自增 ID + 唯一索引 |
+|--|---------|-----------------|
+| 存储空间 | 少（2 个 INT = 8B） | 多（+ 自增 ID 8B + 唯一索引 16B） |
+| 查询效率 | 聚簇索引直接覆盖 | 多一次回表 |
+| 业务含义 | user_id + role_id 就是唯一标识 | ID 无意义 |
+| ORM 兼容 | 复合主键某些框架支持差 | ✅ 通用 |
+
+**什么时候用自增 ID？** 中间表有独立业务含义（如订单-商品需要 ID 做其他表的外键）。
+
+#### 双向索引
+
+```sql
+CREATE TABLE user_role (
+  user_id BIGINT UNSIGNED NOT NULL,
+  role_id BIGINT UNSIGNED NOT NULL,
+  PRIMARY KEY (user_id, role_id),            -- 查用户的所有角色：走 PK
+  INDEX idx_role_id (role_id)                -- 查角色的所有用户：走这个索引
+);
+
+-- 如果查反向（通过角色查用户）很少，可以不加这个索引
+```
+
+**判断是否需要反向索引：** 业务中是否会有「查询某个角色下的所有用户」这种需求。
+
+#### 带属性的中间表
+
+中间表除了关联双方 ID，还可以携带关联本身的属性。
+
+```sql
+-- 学生选课：带成绩、选课时间
+CREATE TABLE enrollment (
+  student_id BIGINT UNSIGNED NOT NULL,
+  course_id  BIGINT UNSIGNED NOT NULL,
+  score      DECIMAL(5,2) DEFAULT NULL,      -- 关联属性：成绩
+  enrolled_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, -- 关联属性：选课时间
+  status     TINYINT UNSIGNED NOT NULL DEFAULT 1,  -- 1=在读 2=结业 3=退课
+  PRIMARY KEY (student_id, course_id),
+  INDEX idx_course_id (course_id)
+);
+
+-- 订单-商品：带数量、单价
+CREATE TABLE order_item (
+  order_id   BIGINT UNSIGNED NOT NULL,
+  product_id BIGINT UNSIGNED NOT NULL,
+  quantity   INT UNSIGNED NOT NULL DEFAULT 1,
+  price      DECIMAL(10,2) NOT NULL,         -- 下单时的价格（快照）
+  PRIMARY KEY (order_id, product_id),
+  INDEX idx_product_id (product_id)
+);
+```
+
+#### 自引用多对多（好友关系）
+
+```sql
+CREATE TABLE friendship (
+  user_id   BIGINT UNSIGNED NOT NULL,
+  friend_id BIGINT UNSIGNED NOT NULL,
+  status    TINYINT UNSIGNED NOT NULL DEFAULT 0,  -- 0=待确认 1=已确认 2=拉黑
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (user_id, friend_id),
+  INDEX idx_friend_id (friend_id)
+);
+
+-- 查询某个用户的所有好友
+SELECT * FROM friendship WHERE user_id = 1 AND status = 1;
+SELECT * FROM friendship WHERE friend_id = 1 AND status = 1;
+-- UNION 或业务层合并
+```
+
+> ⚠️ 好友关系查询需要查两个方向（我的好友 vs 我是对方的好友），业务层合并结果或用 `UNION`。
+
+#### 中间表命名规范
+
+| 关系 | 命名 | 示例 |
+|------|------|------|
+| 用户 ↔ 角色 | `user_role` | 字母序：user 在 role 前 |
+| 学生 ↔ 课程 | `student_course` | 字母序 |
+| 订单 ↔ 商品 | `order_item` | 有属性时用 item |
+| 文章 ↔ 标签 | `article_tag` | 字母序 |
+| 好友 | `friendship` | 有业务含义的独立命名 |
+
+### 关系设计决策树
+
+```
+A 和 B 需要关联？
+├── A 的一条记录对应 B 的一条记录
+│   └── 1:1 → 合并到同一张表，或从表主键 = 外键
+├── A 的一条记录对应 B 的多条记录
+│   └── 1:N → 在 B 表中加 A_id 外键
+└── A 的多条记录对应 B 的多条记录
+    └── N:N → 中间表（复合主键 + 双向索引）
+```
+
 ## DML — 查询与操作
 
 ### SELECT 基础
