@@ -362,39 +362,13 @@ async function handleSend(prompt: string) {
 
 ---
 
-## 9. Request Queue — 防止重复与控制并发
+## 9. 并发控制 — 浏览器请求上限与批量请求
 
-> **如果你用了 SWR / TanStack Query / ahooks useRequest，大部分队列逻辑已经被库内置，不需要手写。** 以下只列出请求库没覆盖的场景。
+浏览器限制了同一域名下最多 **6 个并发请求**（HTTP/1.1 每个域名）。批量上传、大量数据拉取时，需要控制并发数，避免请求排队超时或服务器过载。
 
-### 各请求库默认行为
+> SWR / TanStack Query 自带的去重/重试/取消不处理并发上限问题。以下方案在**批量场景**使用。
 
-| 场景 | SWR | TanStack Query | ahooks useRequest |
-|------|-----|---------------|-------------------|
-| 重复请求合并 | ✅ `dedupingInterval: 2000` | ✅ queryKey 相同自动去重 | ✅ `manual` 控制 |
-| 组件卸载取消 | ✅ 自动 abort | ✅ `signal` 自动 abort | ✅ `cancelOnLeave` |
-| 重试 | ✅ `errorRetryCount` | ✅ `retry: 3` | ✅ `retryCount` |
-| 搜索防抖 | ✅ `useSWR` + `debounce` | ⚠️ 需配合外部 debounce | ✅ `debounceWait` |
-| 取消上一次 | ❌ 需要手动 | ❌ 需要手动 | ✅ `cancel` |
-
-### 还可能需要手写的场景
-
-```ts
-// 场景一：批量上传/并发控制（请求库不处理）
-const q = new ConcurrencyQueue(3);
-const results = await Promise.all(
-  files.map(file => q.add(() => uploadFile(file)))
-);
-
-// 场景二：取消上一次请求（搜索框，非请求库场景）
-let cancelRef: AbortController | null = null;
-async function search(keyword: string) {
-  cancelRef?.abort();
-  cancelRef = new AbortController();
-  return http.get('/api/search', { params: { q: keyword }, signal: cancelRef.signal });
-}
-```
-
-### ConcurrencyQueue 实现
+### ConcurrencyQueue
 
 ```ts
 class ConcurrencyQueue {
