@@ -495,22 +495,116 @@ END;
 
 ### 分页
 
+### 方案一：LIMIT OFFSET（传统分页）
+
 ```sql
--- 传统分页（OFFSET 大时慢）
-SELECT * FROM articles ORDER BY id DESC LIMIT 20 OFFSET 0;    -- 第 1 页
-SELECT * FROM articles ORDER BY id DESC LIMIT 20 OFFSET 20;   -- 第 2 页
-SELECT * FROM articles ORDER BY id DESC LIMIT 20 OFFSET 1000; -- ❌ 已翻 50 页
+-- 第 N 页
+SELECT * FROM articles ORDER BY id DESC LIMIT 20 OFFSET 0;      -- 第 1 页 (id 1000~981)
+SELECT * FROM articles ORDER BY id DESC LIMIT 20 OFFSET 20;     -- 第 2 页 (id 980~961)
+SELECT * FROM articles ORDER BY id DESC LIMIT 20 OFFSET 980;    -- ❌ 第 50 页
+```
 
--- 游标分页（推荐，稳定走索引）
-SELECT * FROM articles WHERE id < 10000 ORDER BY id DESC LIMIT 20;   -- 下一页
-SELECT * FROM articles WHERE id > 500 ORDER BY id ASC LIMIT 20;      -- 上一页
+**为什么 OFFSET 大时慢？**
+```
+客户端想看第 50 页 → MySQL 仍然扫描前面的 980 行 → 丢掉前 980 行 → 返回最后 20 行
+扫描行数 = OFFSET + LIMIT，翻得越深越慢
+```
+适合：数据量小（< 10 万行）或只翻前几页
 
--- 带排序的游标分页
+### 方案二：游标分页 / Keyset Pagination（推荐）
+
+利用索引直接跳到目标位置，不扫描跳过的行。
+
+#### 单字段排序（最常见）
+
+```sql
+-- 下一页 (id 降序，取比当前最小 id 更小的 20 行)
 SELECT * FROM articles
-WHERE (created_at, id) < ('2024-01-01', 10000)
+WHERE id < 980                        -- 上一页的最小 id
+ORDER BY id DESC
+LIMIT 20;
+
+-- 上一页 (id 升序，取比当前最大 id 更大的 20 行，再倒序)
+SELECT * FROM articles
+WHERE id > 1000                       -- 当前页的最大 id
+ORDER BY id ASC
+LIMIT 20;
+-- 应用层将结果逆序，即上一页
+```
+
+**走索引：** `WHERE id < ? ORDER BY id DESC LIMIT 20` → 直接在 `PRIMARY KEY` 上定位 `id=980`，往前取 20 行，1 次索引扫描。
+
+#### 多字段排序
+
+```sql
+-- 按 created_at DESC, id DESC 排序的下一页
+SELECT * FROM articles
+WHERE (created_at, id) < ('2024-01-15 10:00:00', 980)   -- 取上一页最后一条的位置
 ORDER BY created_at DESC, id DESC
 LIMIT 20;
 ```
+
+需要联合索引（`(created_at, id)`），支持元组比较（MySQL 8.0+）。
+
+#### 混合排序方向
+
+```sql
+-- 按热度降序、id 升序（hot DESC, id ASC）
+SELECT * FROM articles
+WHERE hot < 1000
+   OR (hot = 1000 AND id > 5000)
+ORDER BY hot DESC, id ASC
+LIMIT 20;
+```
+
+索引需为 `(hot, id)`。多方向排序时游标条件要拆成 OR。
+
+### 方案三：子查询加速（延迟关联）
+
+适用于大表 + 宽行（很多列），先只查主键再 JOIN 回原表：
+
+```sql
+-- ❌ OFFSET 大时，MySQL 需要把宽行全部扫一遍再丢
+SELECT * FROM articles ORDER BY id DESC LIMIT 20 OFFSET 10000;
+
+-- ✅ 延迟关联：子查询只走 PK 索引，再 JOIN 回原表
+SELECT a.* FROM articles a
+INNER JOIN (
+  SELECT id FROM articles
+  ORDER BY id DESC
+  LIMIT 20 OFFSET 10000
+) tmp ON a.id = tmp.id
+ORDER BY a.id DESC;
+```
+
+**原理：** 子查询 `SELECT id` 只需要扫索引（不碰数据行），索引比全表小很多，内存能装下。确定 20 个 id 后再回表取完整行，只读 20 行。
+
+### 方案四：分段分页（适合后台翻页报表）
+
+```sql
+-- 先估算范围，避免 OFFSET 太大
+SELECT @min_id := MIN(id), @max_id := MAX(id), @total := COUNT(*) FROM articles;
+
+-- 按 id 范围切段，每段内 LIMIT OFFSET（OFFSET 可控）
+SELECT * FROM articles
+WHERE id BETWEEN 50000 AND 100000
+ORDER BY id
+LIMIT 20 OFFSET 0;
+```
+
+### 各方案对比
+
+| 方案 | 深翻页 | 跳页 | 实时排序 | 适用场景 |
+|------|--------|------|---------|---------|
+| LIMIT OFFSET | ❌ 越深越慢 | ✅ 任意页 | ✅ | 小表 / 前几页 |
+| 游标分页 | ✅ 稳定 O(1) | ❌ 只能上下翻 | ✅ | 大表 / 无限滚动 |
+| 延迟关联 | ⚠️ 仍有 OFFSET，但快很多 | ✅ 任意页 | ✅ | OFFSET 大 + 宽行 |
+| 分段分页 | ✅ | ⚠️ 一段内 OFFSET | ❌ 固定段 | 后台导出 / 报表 |
+
+**推荐：**
+- **前台列表/无限滚动** → 游标分页（方案二）
+- **后台管理/可跳页** → 延迟关联（方案三）或 LIMIT OFFSET（小数据量）
+- **数据导出** → 分段分页（方案四）
 
 ---
 
@@ -518,7 +612,10 @@ LIMIT 20;
 
 - ❌ `SELECT *` — 应明确列出字段，避免回表和网络浪费
 - ❌ 在 WHERE 条件列上使用函数 — 导致索引失效
-- ❌ 大表 OFFSET 分页 — 用游标分页替代
+- ❌ 大表 OFFSET 分页 — 翻越深越慢，用游标分页或延迟关联替代
+- ❌ 游标分页用于「跳转到第 N 页」— 游标分页只支持上下翻，不能自由跳页
+- ❌ 排序列不加索引 — 游标分页依赖索引定位，无索引退化为全表扫
+- ❌ 多字段排序只用单字段游标 — 多字段排序必须用 `(col1, col2)` 元组比较，联合索引要匹配
 - ❌ FLOAT/DOUBLE 存金额 — 用 DECIMAL
 - ❌ 字符串列和数字列隐式比较 — 类型不匹配不走索引
 - ❌ 事务内做 HTTP 请求 — 长事务导致锁竞争
