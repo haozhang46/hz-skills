@@ -651,7 +651,155 @@ MySQL 引擎执行窗口函数的过程：
 
 ---
 
-## 常用设计模式
+## MyBatis — 安全传参 & 动态 SQL
+
+前端传入的变量**绝不能直接拼接 SQL 字符串**，必须用参数化查询。MyBatis 的 `#{}` 自动生成 PreparedStatement 占位符，`${}` 直接拼接（有注入风险）。
+
+### `#{}` vs `${}`
+
+```xml
+<!-- ✅ #{} — 参数化查询，防 SQL 注入（PreparedStatement） -->
+<select id="getUser" resultType="User">
+  SELECT * FROM users WHERE id = #{id}        <!-- ? 占位符 -->
+</select>
+
+<!-- ❌ ${} — 直接拼接，SQL 注入风险 -->
+<select id="getUserUnsafe" resultType="User">
+  SELECT * FROM users WHERE id = ${id}        <!-- 直接拼到 SQL 里 -->
+</select>
+<!-- 如果 id = "1 OR 1=1" → SELECT * FROM users WHERE id = 1 OR 1=1 -->
+
+<!-- ✅ ${} 唯一合法场景：动态表名/列名（值不能来自用户输入） -->
+<select id="queryByTable" resultType="map">
+  SELECT * FROM ${tableName} WHERE status = #{status}
+</select>
+<!-- tableName 必须是后端枚举或白名单校验后的值 -->
+```
+
+| | `#{}` | `${}` |
+|--|-------|-------|
+| 方式 | PreparedStatement `?` 占位符 | 字符串直接拼接 |
+| 注入风险 | ❌ 无 | ✅ 有 |
+| 类型 | 值传参 | SQL 片段 |
+| 适用 | WHERE 值、INSERT 值、UPDATE 值 | 表名、列名、ORDER BY 列 |
+| 性能 | 预编译、缓存执行计划 | 每次重新编译 |
+
+### 动态 SQL — 替代字符串拼接
+
+```xml
+<!-- ✅ <if> + <where> 替代手动拼 "WHERE 1=1" -->
+<select id="searchUsers" resultType="User">
+  SELECT * FROM users
+  <where>
+    <if test="name != null and name != ''">
+      AND name LIKE CONCAT('%', #{name}, '%')
+    </if>
+    <if test="status != null">
+      AND status = #{status}
+    </if>
+    <if test="startDate != null">
+      AND created_at >= #{startDate}
+    </if>
+  </where>
+  ORDER BY id DESC
+</select>
+```
+
+```xml
+<!-- ❌ 手动拼 SQL — 易出错的写法 -->
+"SELECT * FROM users WHERE 1=1" +
+" AND name LIKE '%" + name + "%'" +    -- SQL 注入
+" AND status = " + status              -- SQL 注入
+```
+
+### 集合参数（IN 查询）
+
+```xml
+<!-- ✅ <foreach> 自动展开参数列表 -->
+<select id="getUsersByIds" resultType="User">
+  SELECT * FROM users WHERE id IN
+  <foreach collection="ids" item="id" open="(" separator="," close=")">
+    #{id}
+  </foreach>
+</select>
+<!-- ids = [1,2,3] → SELECT * FROM users WHERE id IN (?,?,?) -->
+```
+
+### 批量操作
+
+```xml
+<!-- ✅ 批量 INSERT（一条语句） -->
+<insert id="batchInsert">
+  INSERT INTO users (email, nickname) VALUES
+  <foreach collection="list" item="u" separator=",">
+    (#{u.email}, #{u.nickname})
+  </foreach>
+</insert>
+
+<!-- ✅ 批量 UPDATE（配合 case when） -->
+<update id="batchUpdateStatus">
+  UPDATE users SET status = CASE id
+    <foreach collection="list" item="u">
+      WHEN #{u.id} THEN #{u.status}
+    </foreach>
+  END
+  WHERE id IN
+  <foreach collection="list" item="u" open="(" separator="," close=")">
+    #{u.id}
+  </foreach>
+</update>
+```
+
+### 排序与分页
+
+```xml
+<!-- ✅ ORDER BY 用 ${}，但值必须白名单校验 -->
+<select id="getUsers" resultType="User">
+  SELECT * FROM users
+  <where>
+    <if test="status != null">AND status = #{status}</if>
+  </where>
+  ORDER BY ${orderBy} ${direction}
+  LIMIT #{offset}, #{limit}
+</select>
+```
+
+```java
+// 后端白名单校验，防止注入
+public String validateSortField(String input) {
+    List<String> allowed = Arrays.asList("id", "created_at", "name", "status");
+    if (!allowed.contains(input)) {
+        return "id"; // 默认排序
+    }
+    return input;
+}
+```
+
+### 常见错误
+
+```xml
+<!-- ❌ 模糊查询用 ${} 拼接 -->
+AND name LIKE '%${name}%'
+
+<!-- ✅ 模糊查询用 CONCAT + #{} -->
+AND name LIKE CONCAT('%', #{name}, '%')
+```
+
+```xml
+<!-- ❌ IN 语句用 ${} 拼接 -->
+AND id IN (${ids})
+
+<!-- ✅ IN 语句用 <foreach> + #{} -->
+AND id IN <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+```
+
+### Red Flags
+
+- ❌ `${}` 直接接收前端参数 — 必须白名单校验或禁止
+- ❌ 手动拼 `WHERE 1=1` — 用 `<where>` 标签自动处理 AND/OR
+- ❌ `LIKE '%${x}%'` — 用 `CONCAT('%', #{x}, '%')`
+- ❌ `IN (${ids})` — 用 `<foreach>` 展开
+- ❌ 前端传字段名直接用 `${}` — 后端必须白名单
 
 ### 树结构
 
