@@ -70,7 +70,7 @@ npx why-is-node-running
 - 事件监听器只加不移除（`addEventListener` 无 cleanup）
 - 定时器未清除（`setInterval` 没有 `clearInterval`）
 - 全局缓存无淘汰策略（用 `lru-cache` 替代普通 Map）
-- 大对象被长期存活的闭包引用（闭包本身不释放，引用的对象就无法 GC）
+- 大对象被注册到全局事件/定时器的闭包捕获 → 闭包不释放，大对象跟着泄漏
 - 事件监听器未移除（`emitter.on()` 没有 `off()`）
 - 定时器未清除（`setInterval` 没有 `clearInterval`）
 - 大对象缓存无淘汰策略（用 `lru-cache` 替代普通 Map）
