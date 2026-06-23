@@ -197,14 +197,173 @@ function ChatInput() {
 
 > **Note**: `keyboardWillShow` / `keyboardWillHide` are iOS only. On Android use `keyboardDidShow` / `keyboardDidHide`.
 
+### 4. Typing State & Completion — isTyping / Enter / Debounce
+
+No native `isComplete` prop. Three complementary patterns for different "when has the user finished typing?" scenarios:
+
+#### Pattern A: `isTyping` — 输入中状态
+
+Track whether the user is actively typing. `isTyping = true` starts on first keystroke; after a pause (debounce) it flips back to `false`.
+
+```tsx
+import { useDebounce } from 'ahooks';
+
+function ChatInput() {
+  const [text, setText] = useState('');
+
+  // 用户正在输入 → true, 停笔 500ms → false
+  const isTyping = useDebounce(text, { wait: 500 }) !== text
+                    || (text.length > 0 && text === useDebounce(text, { wait: 500 }));
+
+  // 更直观的写法：独立 isTyping state
+  const [isTyping, setIsTyping] = useState(false);
+
+  useEffect(() => {
+    if (text.length > 0) {
+      setIsTyping(true);
+      const timer = setTimeout(() => setIsTyping(false), 500);
+      return () => clearTimeout(timer);
+    } else {
+      setIsTyping(false);
+    }
+  }, [text]);
+
+  return (
+    <View>
+      <TextInput value={text} onChangeText={setText} />
+      {isTyping && <Text>对方正在输入...</Text>}
+    </View>
+  );
+}
+```
+
+For a reusable hook:
+
+```tsx
+function useIsTyping(text: string, delay = 500): boolean {
+  const [isTyping, setIsTyping] = useState(false);
+
+  useEffect(() => {
+    if (text.length === 0) {
+      setIsTyping(false);
+      return;
+    }
+    setIsTyping(true);
+    const timer = setTimeout(() => setIsTyping(false), delay);
+    return () => clearTimeout(timer);
+  }, [text, delay]);
+
+  return isTyping;
+}
+```
+
+| Use | `isTyping = true` | `isTyping = false` |
+|-----|-------------------|---------------------|
+| Chat "对方正在输入..." | User starts typing | 500ms after last keystroke |
+| Send button state | Text exists (combined with `text.length > 0`) | Text cleared |
+
+#### Pattern B: `onSubmitEditing` — Enter / Done Key Press
+
+When the user taps the **Enter / Return / Done / Search** button on the keyboard.
+This is the closest RN has to a native "input complete" signal.
+
+```tsx
+function SearchField() {
+  const [query, setQuery] = useState('');
+
+  const handleSubmit = useCallback(() => {
+    if (!query.trim()) return;
+    searchAPI(query.trim());
+    Keyboard.dismiss(); // dismiss keyboard after submit
+  }, [query]);
+
+  return (
+    <TextInput
+      value={query}
+      onChangeText={setQuery}
+      onSubmitEditing={handleSubmit}   // fires on Enter/Done
+      returnKeyType="search"           // "search" / "done" / "send" / "go"
+      blurOnSubmit                     // iOS: dismiss keyboard (default true)
+    />
+  );
+}
+```
+
+| `returnKeyType` | Keyboard button label | Typical use |
+|-----------------|----------------------|-------------|
+| `'search'` | Search | Search bar |
+| `'done'` | Done | Single-field form |
+| `'send'` | Send | Chat / message |
+| `'go'` | Go | URL / navigation |
+| `'next'` | Next | Multi-field form (focus next) |
+| `'default'` | return / ↵ | Multi-line input |
+
+Multi-field form — press "Next" to focus the next field:
+
+```tsx
+function LoginForm() {
+  const emailRef = useRef<TextInput>(null);
+  const passwordRef = useRef<TextInput>(null);
+
+  return (
+    <View>
+      <TextInput
+        ref={emailRef}
+        placeholder="Email"
+        returnKeyType="next"
+        onSubmitEditing={() => passwordRef.current?.focus()}
+      />
+      <TextInput
+        ref={passwordRef}
+        placeholder="Password"
+        returnKeyType="done"
+        secureTextEntry
+        onSubmitEditing={handleLogin}
+      />
+    </View>
+  );
+}
+```
+
+#### Pattern C: Debounce — Stopped Typing (Auto-Save / Search)
+
+No built-in `isComplete` prop on TextInput. Use debounce to detect when the user **stops typing** for a defined pause.
+
+```tsx
+// Option 1: useDebounce (ahooks) — debounce the VALUE
+import { useDebounce } from 'ahooks';
+const debouncedQuery = useDebounce(query, { wait: 300 });
+useEffect(() => { if (debouncedQuery) searchAPI(debouncedQuery); }, [debouncedQuery]);
+
+// Option 2: useDebounceFn (ahooks) — debounce the ACTION
+import { useDebounceFn } from 'ahooks';
+const { run: autoSave } = useDebounceFn((t) => saveDraftAPI(t), { wait: 800 });
+
+// Option 3: lodash.debounce — minimal deps
+import debounce from 'lodash/debounce';
+const search = useCallback(debounce((t) => searchAPI(t), 300), []);
+```
+
+| Approach | Best for | Debounce target |
+|----------|----------|----------------|
+| `useDebounce` (ahooks) | Search, filter, derived state | **Value** — debounce the text value |
+| `useDebounceFn` (ahooks) | Auto-save, API calls | **Action** — debounce the function call |
+| `lodash.debounce` | Minimal deps, no ahooks | **Action** — debounce the callback |
+
+#### Which pattern to use?
+
+| Scenario | Pattern |
+|----------|---------|
+| "对方正在输入..." / typing indicator | **A** — `isTyping` |
+| User pressed Search/Done/Send key | **B** — `onSubmitEditing` |
+| Search-as-you-type / auto-save | **C** — Debounce |
+| Chat send button + Enter key | **B + C** — `onSubmitEditing` sends immediately, debounce saves draft |
+
+> **Native side (iOS/Android):** There is no native `isComplete` callback for "user stopped typing." The standard UIKit/Android approach is `textField(_:shouldChangeCharactersIn:)` / `onTextChanged` with a timer — which is exactly what the JS debounce pattern replicates. `onSubmitEditing` maps directly to `textFieldShouldReturn` (iOS) / `onEditorAction(IME_ACTION_DONE)` (Android).
+
 ### Platform-Specific Tips
 
-| Concern | iOS | Android |
-|---------|-----|---------|
-| Keyboard events | `keyboardWillShow/Hide` (animated) | `keyboardDidShow/Hide` (no animation) |
-| KeyboardAvoidingView `behavior` | `'padding'` | `'height'` |
-| `keyboardVerticalOffset` | NavBar height needed | Usually 0 |
-| Dismiss keyboard on tap | `Keyboard.dismiss()` + `resignFirstResponder` | `Keyboard.dismiss()` + `android:windowSoftInputMode="adjustResize"` |
+### Platform-Specific Tips
 
 ---
 
@@ -264,3 +423,6 @@ function FormScreen() {
 - ❌ Using `keyboardWillShow` on Android → event never fires, use `keyboardDidShow`
 - ❌ `KeyboardAvoidingView` without `behavior` prop → no effect
 - ❌ Ignoring gesture navigation bottom inset on Android (`insets.bottom > 0` on gesture nav devices)
+- ❌ Waiting for a native `isComplete` callback — RN TextInput has no such prop, use JS debounce
+- ❌ `onSubmitEditing` without `returnKeyType` — keyboard button shows default "return" instead of "Search"/"Done"/"Send"
+- ❌ Missing `Keyboard.dismiss()` in `onSubmitEditing` — keyboard stays open after submit on some platforms
