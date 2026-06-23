@@ -484,6 +484,64 @@ function FormField({ children, label }: { children: (props: FieldProps) => React
 
 **When cloneElement IS acceptable:** Injecting a class name or style into a single immediate child in a design-system component (e.g., `ButtonGroup` adding margin to `Button` children). Even then, prefer CSS `gap` or `:has()`.
 
+---
+
+## 12. 锚点导航 — 点击列表滚动到对应区域
+
+### 推荐：`react-scroll`
+
+```bash
+npm install react-scroll
+```
+
+```tsx
+import { Link, Element } from 'react-scroll';
+
+function Toc() {
+  return (
+    <nav>
+      <Link to="section1" smooth duration={500} offset={-80}
+            activeClass="active" spy>
+        第一章
+      </Link>
+      <Link to="section2" smooth duration={500} offset={-80}
+            activeClass="active" spy>
+        第二章
+      </Link>
+    </nav>
+  );
+}
+
+function Content() {
+  return (
+    <div>
+      <Element name="section1"><h2>第一章</h2></Element>
+      <Element name="section2"><h2>第二章</h2></Element>
+    </div>
+  );
+}
+```
+
+### 轻量方案：原生 scrollIntoView（零依赖）
+
+```tsx
+const scrollTo = (id: string) => {
+  document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+};
+
+<button onClick={() => scrollTo('section1')}>第一章</button>
+<div id="section1"><h2>第一章</h2></div>
+```
+
+| 功能 | 原生 scrollIntoView | react-scroll |
+|------|-------------------|-------------|
+| 平滑滚动 | ✅ | ✅ |
+| offset（导航栏补偿） | ❌ 需自己算 | ✅ `offset={-80}` |
+| spy（当前高亮） | ❌ 需自己监听 | ✅ `spy + activeClass` |
+| 依赖 | 零 | 需安装 |
+
+**简单场景用原生，需要 spy + offset 时上 `react-scroll`。**
+
 ## Why a Separate Skill
 
 `vercel-react-best-practices` is upstream. Team conventions live here so the upstream skill stays updateable.
