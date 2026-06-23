@@ -269,6 +269,146 @@ KILL <thread_id>;
 
 ---
 
+## Window Functions & Sliding Window
+
+窗口函数在每一行上定义一个 **帧（Frame）**，帧可以在 `ORDER BY` 排序后的窗口内滑动，这就是滑动窗口（Sliding Window）的底层实现。
+
+### 基础语法
+
+```sql
+SELECT value,
+  AVG(value) OVER (
+    ORDER BY id
+    ROWS BETWEEN 2 PRECEDING AND CURRENT ROW
+  ) AS moving_avg
+FROM measurements;
+```
+
+`OVER()` 的三部分：
+1. `PARTITION BY col` — 按列分组（可选，不加就是全表一个窗口）
+2. `ORDER BY col` — 窗口内排序（帧定义依赖排序）
+3. `ROWS / RANGE / GROUPS BETWEEN ... AND ...` — 帧范围定义
+
+### 帧范围（Frame Clause）
+
+| 关键词 | 含义 |
+|--------|------|
+| `UNBOUNDED PRECEDING` | 分区第一行 |
+| `N PRECEDING` | 往前 N 行 |
+| `CURRENT ROW` | 当前行 |
+| `N FOLLOWING` | 往后 N 行 |
+| `UNBOUNDED FOLLOWING` | 分区最后一行 |
+
+### 三种帧类型
+
+| 类型 | 基于 | 说明 |
+|------|------|------|
+| `ROWS BETWEEN` | 物理行数 | 严格按行号偏移，不管值是否相同 |
+| `RANGE BETWEEN` | 列值范围 | 相同 ORDER BY 值的行都包含在内 |
+| `GROUPS BETWEEN` | 逻辑组 | 相同 ORDER BY 值的行算一组 |
+
+```sql
+-- ROWS: 严格 2 行
+SELECT id, value,
+  AVG(value) OVER (ORDER BY id ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING) AS row_avg
+FROM t;
+
+-- RANGE: 值偏差 ±10 以内的所有行
+SELECT id, value,
+  AVG(value) OVER (ORDER BY value RANGE BETWEEN 10 PRECEDING AND 10 FOLLOWING) AS range_avg
+FROM t;
+
+-- GROUPS: 相同值的行算一组（MySQL 8.0+）
+SELECT id, dept, salary,
+  AVG(salary) OVER (ORDER BY salary GROUPS BETWEEN 1 PRECEDING AND 1 FOLLOWING) AS group_avg
+FROM employee;
+```
+
+### 常见滑动窗口应用
+
+#### 移动平均
+
+```sql
+-- 7 日移动平均
+SELECT date, revenue,
+  AVG(revenue) OVER (ORDER BY date ROWS BETWEEN 6 PRECEDING AND CURRENT ROW) AS ma_7
+FROM daily_revenue;
+```
+
+#### 累计求和（Running Total）
+
+```sql
+-- 默认帧：RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+SELECT date, amount,
+  SUM(amount) OVER (ORDER BY date) AS running_total
+FROM transactions;
+```
+
+#### 同比环比
+
+```sql
+-- 与上一行比较（LAG）
+SELECT date, revenue,
+  LAG(revenue, 7) OVER (ORDER BY date) AS revenue_7d_ago,
+  revenue - LAG(revenue, 7) OVER (ORDER BY date) AS diff
+FROM daily_revenue;
+```
+
+#### 最大值/N 行范围
+
+```sql
+-- 当前行及前后各 1 行的最大值
+SELECT id, value,
+  MAX(value) OVER (ORDER BY id ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING) AS local_max
+FROM series;
+```
+
+### 默认帧
+
+不写 `BETWEEN` 时默认帧取决于是否有 `ORDER BY`：
+
+```sql
+-- 有 ORDER BY：默认 RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+SUM(value) OVER (ORDER BY id)
+-- 等价于
+SUM(value) OVER (ORDER BY id RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
+
+-- 无 ORDER BY：默认整分区（相当于 UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING）
+SUM(value) OVER ()
+```
+
+> ⚠️ `RANGE BETWEEN` 默认帧有个坑：如果 ORDER BY 列有重复值，会一次包含所有相同值，可能导致结果和预期不符。想要严格按行走，用 `ROWS BETWEEN`。
+
+### 底层实现
+
+MySQL 引擎执行窗口函数的过程：
+
+```
+原始表 → 排序（Sort / Filesort）→ 窗口计算（逐行扫描，维护帧缓存）→ 输出
+```
+
+1. **排序阶段**：按 `PARTITION BY + ORDER BY` 排序，排序结果存入临时表
+2. **扫描计算**：逐行扫描排序结果，根据帧定义维护一个**滑动窗口缓冲区**
+   - `ROWS BETWEEN N PRECEDING AND M FOLLOWING` — 队列维护最近 N+M+1 行
+   - 行进入帧 → 加入聚合计算
+   - 行离开帧 → 从聚合中减去
+3. **增量聚合**：聚合结果复用（`SUM` 减去离开的值，加上进入的值），不重新全量计算
+
+**性能影响：**
+- 排序是主要开销（`Using filesort` 或内存排序）
+- 帧越大，缓存越大
+- `ROWS` 比 `RANGE` 快（物理偏移判断比值范围判断快）
+- 大表上窗口函数可能使用大量临时表空间（`tmp_table_size` / `innodb_temp_tablespaces`）
+
+### Red Flags
+
+- ❌ 默认 `RANGE BETWEEN` 在重复键下行为诡异 — 需要严格行数用 `ROWS`
+- ❌ 窗口函数不写 `ORDER BY` 可能不报错但结果全分区聚合
+- ❌ 大表 + 大帧 + 无合适索引 = 磁盘临时表 + 性能灾难
+- ❌ MySQL 8.0 以下不支持窗口函数（5.7 及之前用变量模拟）
+
+---
+
 ## 常用设计模式
 
 ### 树结构
