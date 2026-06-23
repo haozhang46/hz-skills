@@ -130,9 +130,11 @@ Mobile is the default (no modifier needed).
 | Breakpoint | Modifier | Min width |
 |-----------|----------|-----------|
 | **Mobile** (default) | *(none)* | 0 |
-| **Pad** | `--tablet` | 768px |
-| **Desktop** | `--desktop` | 1024px |
-| **Wide** | `--wide` | 1280px |
+| **Pad** | `--tablet` | **768px** ← Tailwind `md:` |
+| **Desktop** | `--desktop` | **1024px** ← Tailwind `lg:` |
+| **Wide** | `--wide` | **1280px** ← Tailwind `xl:` |
+
+> 这些断点值和 Tailwind 内置的 `md(768)` / `lg(1024)` / `xl(1280)` 完全一致，不需要额外定义。
 
 ```css
 /* ✅ CSS — mobile base + BEM modifier overrides */
@@ -194,8 +196,6 @@ function PostCard() {
 - `grep post-card--tablet` finds exactly where tablet styles are defined
 - Mobile-first keeps the base clean; each modifier only adds what changes
 - No Tailwind responsive prefixes in HTML — all breakpoint logic is in CSS
-
-## Conditional Class → classnames / clsx — No Template Ternaries
 
 ```tsx
 // ❌ template ternary — unreadable, noisy
