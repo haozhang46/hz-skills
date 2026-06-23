@@ -8,12 +8,44 @@ description: CSS 实践 — Grid vs Flexbox 选择、间距规范（gap / margin
 ## 核心原则
 
 ```
-一维布局（行或列）→ Flexbox
-二维布局（行列同时）→ Grid
-多列列表（本质是二维）→ Grid
-```
+显示模式
+├── inline    → 行内，不能设宽高，text-align 对齐
+├── block     → 块级，占满父级宽度，margin: 0 auto 居中
+├── inline-block → 行内但可设宽高
+├── flex      → 一维布局（水平或垂直），justify-content / align-items
+└── grid      → 二维布局（行列同时），多列列表首选
 
-**多列列表是二维的**（行 × 列），所以用 Grid 更合适，Flexbox 需要各种 hack 才能对齐。
+间距
+├── gap（推荐）→ 无 margin 折叠问题
+├── margin-bottom（仅上面的元素设，下面的不设）
+└── * + * { margin-top }（所有兄弟间加间距）
+
+尺寸
+├── 按钮/标签/卡片 → 不固定宽高，min-width + padding 撑开
+├── 图标/头像     → 固定宽高
+└── 字号 → rem，边框/阴影 → px
+
+命名
+├── HTML 只用语义化 BEM class（block__element--modifier）
+├── CSS 用 @apply 使用 Tailwind 工具类
+├── Nesting 允许但必须写完整类名（禁止 &__）
+└── 条件类名用 clsx
+
+单位
+├── 字号 → rem（支持用户缩放）
+├── 间距 → rem（随字号同步）
+├── 边框 → px（固定不变）
+├── 宽高 → % 或 vw/vh（响应式）
+└── 圆角 → px（小） / %（圆形）
+
+对齐
+├── inline 水平 → text-align: center
+├── inline 垂直 → line-height / vertical-align
+├── block 水平  → margin: 0 auto
+├── flex 水平   → justify-content
+├── flex 垂直   → align-items
+└── 绝对居中    → flex + justify-content: center + align-items: center
+```
 
 ---
 
