@@ -542,6 +542,124 @@ const scrollTo = (id: string) => {
 
 **简单场景用原生，需要 spy + offset 时上 `react-scroll`。**
 
+---
+
+## 13. 虚拟滚动 — 什么时候用
+
+### 虚拟列表解决的问题
+
+大量数据列表（1000+ 条）时，渲染所有 DOM 节点会导致：
+- 首屏渲染慢
+- 内存占用高
+- 滚动卡顿
+
+虚拟列表只渲染可视区域内的 DOM，其他用空白占位。
+
+### 常用库
+
+| 包 | 特点 | 推荐度 |
+|----|------|--------|
+| `react-window` | 轻量（~5KB），功能稳定 | ⭐ **推荐** |
+| `react-virtuoso` | 自动高度、Group、Sticky header | ✅ 功能多 |
+| `react-native` (FlatList) | RN 内置 | ✅ RN 首选 |
+| 自己实现 | 不推荐，坑多 | ❌ |
+
+### 什么时候该用
+
+```
+列表项数量
+├── < 100 条 → ❌ 不需要虚拟滚动，普通 map
+├── 100~1000 条
+│   ├── 每一项很简单（几行文字） → ❌ 不需要
+│   └── 每一项很复杂（图片、富文本） → ✅ 考虑使用
+├── 1000~10000 条 → ✅ 推荐使用
+└── > 10000 条 → ✅ 必须使用
+```
+
+### react-window 示例
+
+```tsx
+import { FixedSizeList } from 'react-window';
+
+function VirtualList({ items }: { items: Item[] }) {
+  const Row = ({ index, style }: { index: number; style: React.CSSProperties }) => (
+    <div style={style}>
+      <div className="item">{items[index].name}</div>
+    </div>
+  );
+
+  return (
+    <FixedSizeList
+      height={600}             // 可视区域高度
+      itemCount={items.length}  // 总数据量
+      itemSize={80}             // 每项高度（px）
+      width="100%"
+    >
+      {Row}
+    </FixedSizeList>
+  );
+}
+```
+
+### 什么时候不需要虚拟滚动
+
+```tsx
+// ✅ 不需要：分页列表（后端分页，每次只返回 10~20 条）
+function PaginatedList() {
+  const { data, fetchNextPage } = useInfiniteQuery(...);
+  return data?.pages.map(page =>
+    page.items.map(item => <ItemCard key={item.id} item={item} />)
+  );
+}
+
+// ✅ 不需要：数据量 < 100 且每项简单
+function ShortList({ items }: { items: Item[] }) {
+  return items.map(item => <div key={item.id}>{item.name}</div>);
+}
+
+// ✅ 不需要：搜索下拉框（最多几十条）
+function SearchSelect() {
+  return <List>{filteredItems.slice(0, 50).map(renderOption)}</List>;
+}
+```
+
+### 虚拟滚动 + 锚点跳转
+
+```tsx
+import { FixedSizeList as List } from 'react-window';
+import { useRef } from 'react';
+
+function TocAndList() {
+  const listRef = useRef<List>(null);
+
+  const scrollToSection = (index: number) => {
+    listRef.current?.scrollToItem(index, 'start');
+  };
+
+  return (
+    <div>
+      <nav>
+        <button onClick={() => scrollToSection(0)}>第一项</button>
+        <button onClick={() => scrollToSection(10)}>第十项</button>
+      </nav>
+      <List ref={listRef} height={600} itemCount={1000} itemSize={80}>
+        {Row}
+      </List>
+    </div>
+  );
+}
+```
+
+### 总结
+
+| 数据量 | 每项复杂度 | 方案 |
+|--------|-----------|------|
+| < 100 | 任意 | 普通 map |
+| 100~1000 | 简单 | 普通 map |
+| 100~1000 | 复杂（图片） | 虚拟列表 |
+| 1000~10000 | 任意 | 虚拟列表 |
+| > 10000 | 任意 | 虚拟列表 + 分页加载 |
+
 ## Why a Separate Skill
 
 `vercel-react-best-practices` is upstream. Team conventions live here so the upstream skill stays updateable.
